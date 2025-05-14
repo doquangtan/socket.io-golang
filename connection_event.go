@@ -4,7 +4,7 @@ import (
 	"sync"
 )
 
-type connectionEventCallback func(payload *Socket)
+type connectionEventCallback func(payload *Socket, paramsRow map[string]string)
 
 type connectionEvent struct {
 	sync.RWMutex

@@ -376,7 +376,9 @@ func (s *Io) new() func(ctx *fiber.Ctx) error {
 						}.ToJson())
 
 						for _, callback := range s.Of(namespace).onConnection.get("connection") {
-							callback(socket_nps)
+							dataJson := map[string]string{}
+							json.Unmarshal([]byte(rawpayload), &dataJson)
+							callback(socket_nps, dataJson)
 						}
 					case socket_protocol.EVENT.String():
 						socket_nps, err := s.Of(namespace).sockets.get(socket.Id)
@@ -575,7 +577,9 @@ func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					}.ToJson())
 
 					for _, callback := range s.Of(namespace).onConnection.get("connection") {
-						callback(socket_nps)
+						dataJson := map[string]string{}
+						json.Unmarshal([]byte(rawpayload), &dataJson)
+						callback(socket_nps, dataJson)
 					}
 				case socket_protocol.EVENT.String():
 					socket_nps, err := s.Of(namespace).sockets.get(socket.Id)

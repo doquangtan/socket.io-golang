@@ -20,7 +20,14 @@ func socketIoHandle(io *socketio.Io) {
 		return true
 	})
 
-	io.OnConnection(func(socket *socketio.Socket) {
+	io.OnConnection(func(socket *socketio.Socket, params map[string]string) {
+		// Get chatID from auth params
+		// chatIDStr, ok := params["chatID"]
+		// if !ok || len(chatIDStr) == 0 {
+		// 	socket.Emit("error", "Missing chatID")
+		// 	return
+		// }
+
 		println("connect", socket.Nps, socket.Id)
 		socket.Join("demo")
 		io.To("demo").Emit("test", socket.Id+" join us room...", "server message")
@@ -74,7 +81,7 @@ func socketIoHandle(io *socketio.Io) {
 		})
 	})
 
-	io.Of("/test").OnConnection(func(socket *socketio.Socket) {
+	io.Of("/test").OnConnection(func(socket *socketio.Socket, params map[string]string) {
 		println("connect", socket.Nps, socket.Id)
 
 		socket.On("chat message", func(event *socketio.EventPayload) {
