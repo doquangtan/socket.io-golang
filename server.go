@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/doquangtan/socket.io/v4/engineio"
-	"github.com/doquangtan/socket.io/v4/socket_protocol"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
 	"github.com/google/uuid"
+	"github.com/lib4u/socket.io-golang/v4/engineio"
+	"github.com/lib4u/socket.io-golang/v4/socket_protocol"
 
 	gWebsocket "github.com/gorilla/websocket"
 )

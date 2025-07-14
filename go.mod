@@ -1,4 +1,4 @@
-module github.com/doquangtan/socket.io/v4
+module github.com/lib4u/socket.io-golang/v4
 
 go 1.22.2
 

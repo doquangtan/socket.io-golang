@@ -3,12 +3,13 @@ package socketio
 import (
 	"errors"
 	"io"
+	"sync"
 	"time"
 
-	"github.com/doquangtan/socket.io/v4/engineio"
-	"github.com/doquangtan/socket.io/v4/socket_protocol"
 	"github.com/gofiber/websocket/v2"
 	gWebsocket "github.com/gorilla/websocket"
+	"github.com/lib4u/socket.io-golang/v4/engineio"
+	"github.com/lib4u/socket.io-golang/v4/socket_protocol"
 )
 
 type Conn struct {
@@ -57,31 +58,44 @@ type Socket struct {
 	Join      func(room string)
 	Leave     func(room string)
 	To        func(room string) *Room
+	mu        sync.Mutex
 }
 
 func (s *Socket) On(event string, fn eventCallback) {
 	s.listeners.set(event, fn)
 }
 
-func (s *Socket) Emit(event string, agrs ...interface{}) error {
-	c := s.Conn
-	if c == nil {
+func (s *Socket) Emit(event string, args ...interface{}) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.Conn == nil {
 		return errors.New("socket has disconnected")
 	}
-	agrs = append([]interface{}{event}, agrs...)
-	return s.writer(socket_protocol.EVENT, agrs)
+
+	payload := make([]interface{}, 1+len(args))
+	payload[0] = event
+	copy(payload[1:], args)
+	return s.writerUnsafe(socket_protocol.EVENT, payload)
 }
 
-func (s *Socket) ack(ackEvent string, agrs ...interface{}) error {
-	c := s.Conn
-	if c == nil {
+func (s *Socket) ack(event string, args ...interface{}) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.Conn == nil {
 		return errors.New("socket has disconnected")
 	}
-	agrs = append([]interface{}{ackEvent}, agrs...)
-	return s.writer(socket_protocol.ACK, agrs)
+
+	payload := make([]interface{}, 1+len(args))
+	payload[0] = event
+	copy(payload[1:], args)
+	return s.writerUnsafe(socket_protocol.ACK, payload)
 }
 
 func (s *Socket) Ping() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	c := s.Conn
 	if c == nil {
 		return errors.New("socket has disconnected")
@@ -96,12 +110,17 @@ func (s *Socket) Ping() error {
 }
 
 func (s *Socket) Disconnect() error {
-	c := s.Conn
-	if c == nil {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.Conn == nil {
 		return errors.New("socket has disconnected")
 	}
-	s.writer(socket_protocol.DISCONNECT)
-	return c.SetReadDeadline(time.Now())
+
+	if err := s.writerUnsafe(socket_protocol.DISCONNECT); err != nil {
+		return err
+	}
+	return s.Conn.SetReadDeadline(time.Now())
 }
 
 func (s *Socket) Rooms() []string {
@@ -120,6 +139,8 @@ func (s *Socket) disconnect() {
 }
 
 func (s *Socket) engineWrite(t engineio.PacketType, arg ...interface{}) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	w, err := s.Conn.NextWriter(websocket.TextMessage)
 	if err != nil {
 		return err
@@ -129,6 +150,12 @@ func (s *Socket) engineWrite(t engineio.PacketType, arg ...interface{}) error {
 }
 
 func (s *Socket) writer(t socket_protocol.PacketType, arg ...interface{}) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.writerUnsafe(t, arg...)
+}
+
+func (s *Socket) writerUnsafe(t socket_protocol.PacketType, arg ...interface{}) error {
 	w, err := s.Conn.NextWriter(websocket.TextMessage)
 	if err != nil {
 		return err

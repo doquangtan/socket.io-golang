@@ -5,10 +5,10 @@ import (
 	"log"
 	"net/http"
 
-	socketio "github.com/doquangtan/socket.io/v4"
 	"github.com/gin-contrib/static"
 	"github.com/gin-gonic/gin"
 	"github.com/gofiber/fiber/v2"
+	socketio "github.com/lib4u/socket.io-golang/v4"
 )
 
 func socketIoHandle(io *socketio.Io) {
