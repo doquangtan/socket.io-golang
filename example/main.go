@@ -12,7 +12,7 @@ import (
 )
 
 func socketIoHandle(io *socketio.Io) {
-	io.OnAuthorization(func(params map[string]string) bool {
+	io.OnAuthentication(func(params map[string]string) bool {
 		token, ok := params["token"]
 		if !ok || token != "123" {
 			return false

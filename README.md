@@ -107,12 +107,12 @@ io.OnConnection(func(socket *socketio.Socket) {
 })
 ```
 
-#### Event: 'authorization'
+#### Event: 'authentication'
 
 Server:
 
 ```go
-io.OnAuthorization(func(params map[string]string) bool {
+io.OnAuthentication(func(params map[string]string) bool {
 	token, ok := params["token"]
 	if !ok || token != "123" {
 		return false
