@@ -13,10 +13,10 @@ import (
 
 func socketIoHandle(io *socketio.Io) {
 	io.OnAuthorization(func(params map[string]string) bool {
-		// auth, ok := params["Authorization"]
-		// if !ok {
-		// 	return false
-		// }
+		token, ok := params["token"]
+		if !ok || token != "123" {
+			return false
+		}
 		return true
 	})
 

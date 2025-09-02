@@ -107,6 +107,31 @@ io.OnConnection(func(socket *socketio.Socket) {
 })
 ```
 
+#### Event: 'authorization'
+
+Server:
+
+```go
+io.OnAuthorization(func(params map[string]string) bool {
+	token, ok := params["token"]
+	if !ok || token != "123" {
+		return false
+	}
+	return true
+})
+```
+
+Client: ([example javascript client](https://socket.io/docs/v4/client-api/#iourl))
+
+```javascript
+var socket = io("/", {
+  transports: ["websocket"],
+  auth: {
+    token: "123",
+  },
+});
+```
+
 ### Methods
 
 #### server.emit(eventName[, ...args])
