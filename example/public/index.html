@@ -69,6 +69,9 @@
 		<script>
 			var socket = io("/", {
 				transports: ["websocket"],
+				auth: {
+					token: "123"
+				},
 			});
 
 			var messages = document.getElementById("messages");
