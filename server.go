@@ -25,15 +25,15 @@ type payload struct {
 }
 
 type Io struct {
-	pingInterval    time.Duration
-	pingTimeout     time.Duration
-	maxPayload      int
-	namespaces      namespaces
-	sockets         connections
-	readChan        chan payload
-	onAuthorization func(params map[string]string) bool
-	onConnection    connectionEvent
-	close           chan interface{}
+	pingInterval     time.Duration
+	pingTimeout      time.Duration
+	maxPayload       int
+	namespaces       namespaces
+	sockets          connections
+	readChan         chan payload
+	onAuthentication func(params map[string]string) bool
+	onConnection     connectionEvent
+	close            chan interface{}
 }
 
 func New() *Io {
@@ -124,8 +124,8 @@ func (s *Io) OnConnection(fn connectionEventCallback) {
 	s.Of("/").onConnection.set("connection", fn)
 }
 
-func (s *Io) OnAuthorization(fn func(params map[string]string) bool) {
-	s.onAuthorization = fn
+func (s *Io) OnAuthentication(fn func(params map[string]string) bool) {
+	s.onAuthentication = fn
 }
 
 func (s *Io) Emit(event string, agrs ...interface{}) error {
@@ -336,10 +336,10 @@ func (s *Io) new() func(ctx *fiber.Ctx) error {
 							}
 						}
 
-						if s.onAuthorization != nil {
+						if s.onAuthentication != nil {
 							dataJson := map[string]string{}
 							json.Unmarshal([]byte(rawpayload), &dataJson)
-							if !s.onAuthorization(dataJson) {
+							if !s.onAuthentication(dataJson) {
 								socket_nps.writer(socket_protocol.CONNECT_ERROR, map[string]interface{}{
 									"message": "Not authorized",
 								})
@@ -537,12 +537,12 @@ func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 
-					if s.onAuthorization != nil {
+					if s.onAuthentication != nil {
 						dataJson := map[string]string{}
 						json.Unmarshal([]byte(rawpayload), &dataJson)
-						if !s.onAuthorization(dataJson) {
+						if !s.onAuthentication(dataJson) {
 							socket_nps.writer(socket_protocol.CONNECT_ERROR, map[string]interface{}{
-								"message": "Not authorized",
+								"message": "Not authenticated",
 							})
 							continue
 						}
