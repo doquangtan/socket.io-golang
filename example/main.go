@@ -126,6 +126,6 @@ func httpServer() {
 
 func main() {
 	// httpServer()
-	usingWithGoFiber()
-	// usingWithGin()
+	// usingWithGoFiber()
+	usingWithGin()
 }
