@@ -341,7 +341,7 @@ func (s *Io) new() func(ctx *fiber.Ctx) error {
 							json.Unmarshal([]byte(rawpayload), &dataJson)
 							if !s.onAuthentication(dataJson) {
 								socket_nps.writer(socket_protocol.CONNECT_ERROR, map[string]interface{}{
-									"message": "Not authorized",
+									"message": "Not authenticated",
 								})
 								continue
 							}
