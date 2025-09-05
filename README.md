@@ -39,7 +39,7 @@ Using with standard library [net/http](https://pkg.go.dev/net/http)
 ```go
 import (
 	"net/http"
-	socketio "github.com/doquangtan/socketio/v4"
+	"github.com/doquangtan/socketio/v4"
 )
 
 func main() {
@@ -59,7 +59,7 @@ Using with web-framework [Gin](https://github.com/gin-gonic/gin)
 ```go
 import (
 	"github.com/gin-gonic/gin"
-	socketio "github.com/doquangtan/socketio/v4"
+	"github.com/doquangtan/socketio/v4"
 )
 
 func main() {
@@ -80,7 +80,7 @@ Using with web-framework [Go Fiber](https://gofiber.io)
 ```go
 import (
 	"github.com/gofiber/fiber/v2"
-	socketio "github.com/doquangtan/socketio/v4"
+	"github.com/doquangtan/socketio/v4"
 )
 
 func main() {
