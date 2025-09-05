@@ -8,7 +8,7 @@ IF %func%==public (
 
     git pull
 
-    git tag -a %version% -m "Releasing version v4.0.10: - Change the name function authorization to authentication"
+    git tag -a %version% -m "v4.0.11: \n- Fixed issues with using socket..Emit() concurrently. \n- Added file server for net/http"
 
     git push origin %version%
 
@@ -19,4 +19,4 @@ IF %func%==public (
     echo Done %func%
 )
 
-@REM make public v4.0.10
+@REM make public v4.0.11

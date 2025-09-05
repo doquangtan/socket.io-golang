@@ -3,6 +3,7 @@ package socketio
 import (
 	"errors"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/doquangtan/socket.io/v4/engineio"
@@ -47,6 +48,7 @@ func (c *Conn) Close() error {
 }
 
 type Socket struct {
+	sync.RWMutex
 	Id        string
 	Nps       string
 	Conn      *Conn
@@ -120,6 +122,8 @@ func (s *Socket) disconnect() {
 }
 
 func (s *Socket) engineWrite(t engineio.PacketType, arg ...interface{}) error {
+	s.Lock()
+	defer s.Unlock()
 	w, err := s.Conn.NextWriter(websocket.TextMessage)
 	if err != nil {
 		return err
@@ -129,6 +133,8 @@ func (s *Socket) engineWrite(t engineio.PacketType, arg ...interface{}) error {
 }
 
 func (s *Socket) writer(t socket_protocol.PacketType, arg ...interface{}) error {
+	s.Lock()
+	defer s.Unlock()
 	w, err := s.Conn.NextWriter(websocket.TextMessage)
 	if err != nil {
 		return err

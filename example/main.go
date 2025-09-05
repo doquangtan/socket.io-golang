@@ -26,7 +26,18 @@ func socketIoHandle(io *socketio.Io) {
 		io.To("demo").Emit("test", socket.Id+" join us room...", "server message")
 
 		socket.On("connected", func(event *socketio.EventPayload) {
-			socket.Emit("chat message", "Main")
+			go func() {
+				socket.Emit("chat message", "Main 1")
+			}()
+			go func() {
+				socket.Emit("chat message", "Main 2")
+			}()
+			go func() {
+				socket.Emit("chat message", "Main 3")
+			}()
+			go func() {
+				socket.Emit("chat message", "Main 4")
+			}()
 		})
 		socket.On("test", func(event *socketio.EventPayload) {
 			socket.Emit("test", event.Data...)
@@ -110,7 +121,7 @@ func usingWithGin() {
 
 	router := gin.Default()
 	router.Use(static.Serve("/", static.LocalFile("./public", false)))
-	router.GET("/socket.io/", gin.WrapH(io.HttpHandler()))
+	router.GET("/socket.io/*any", gin.WrapH(io.HttpHandler()))
 	router.Run(":3300")
 }
 
@@ -126,6 +137,6 @@ func httpServer() {
 
 func main() {
 	// httpServer()
-	// usingWithGoFiber()
-	usingWithGin()
+	usingWithGoFiber()
+	// usingWithGin()
 }
