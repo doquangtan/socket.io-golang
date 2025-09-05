@@ -70,7 +70,7 @@ func main() {
 	})
 
 	router := gin.Default()
-	router.GET("/socket.io/", gin.WrapH(io.HttpHandler()))
+	router.GET("/socket.io/*any", gin.WrapH(io.HttpHandler()))
 	router.Run(":3300")
 }
 ```
