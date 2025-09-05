@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/http"
 
-	socketio "github.com/doquangtan/socket.io/v4"
+	"github.com/doquangtan/socketio/v4"
 	"github.com/gin-contrib/static"
 	"github.com/gin-gonic/gin"
 	"github.com/gofiber/fiber/v2"

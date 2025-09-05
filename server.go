@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/doquangtan/socket.io/v4/engineio"
-	"github.com/doquangtan/socket.io/v4/socket_protocol"
+	"github.com/doquangtan/socketio/v4/engineio"
+	"github.com/doquangtan/socketio/v4/socket_protocol"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
 	"github.com/google/uuid"
