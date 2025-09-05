@@ -14,7 +14,7 @@ IF %func%==public (
 
     SET GOPROXY=proxy.golang.org
 
-    go list -m github.com/doquangtan/socketio/v4@%version%
+    go list -m github.com/doquangtan/socket.io/v4@%version%
     
     echo Done %func%
 )
