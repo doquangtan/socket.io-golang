@@ -8,7 +8,7 @@ IF %func%==public (
 
     git pull
 
-    git tag -a %version% -m "v4.1.1: Rename module path to github.com/doquangtan/socketio/v4"
+    git tag -a %version% -m "v4.1.4: - Fixed error not found socket.io.min.js when get that file from package directory."
 
     git push origin %version%
 
@@ -19,4 +19,4 @@ IF %func%==public (
     echo Done %func%
 )
 
-@REM make public v4.1.1
+@REM make public v4.1.4

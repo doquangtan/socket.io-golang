@@ -2,7 +2,9 @@ package socketio
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
+	"io/fs"
 	"log"
 	"net/http"
 	"reflect"
@@ -13,11 +15,15 @@ import (
 	"github.com/doquangtan/socketio/v4/engineio"
 	"github.com/doquangtan/socketio/v4/socket_protocol"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/gofiber/websocket/v2"
 	"github.com/google/uuid"
 
 	gWebsocket "github.com/gorilla/websocket"
 )
+
+//go:embed client-dist/*
+var staticFS embed.FS
 
 type payload struct {
 	socket *Socket
@@ -68,7 +74,10 @@ func New() *Io {
 }
 
 func (s *Io) Server(router fiber.Router) {
-	router.Static("/", "../client-dist")
+	clientDistFs, _ := fs.Sub(staticFS, "client-dist")
+	router.Use("/", filesystem.New(filesystem.Config{
+		Root: http.FS(clientDistFs),
+	}))
 	router.Use("/", func(c *fiber.Ctx) error {
 		if websocket.IsWebSocketUpgrade(c) {
 			c.Locals("allowed", true)
@@ -87,7 +96,10 @@ func (s *Io) Middleware(c *fiber.Ctx) error {
 }
 
 func (s *Io) FiberRoute(router fiber.Router) {
-	router.Static("/", "../client-dist")
+	clientDistFs, _ := fs.Sub(staticFS, "client-dist")
+	router.Use("/", filesystem.New(filesystem.Config{
+		Root: http.FS(clientDistFs),
+	}))
 	router.Use("/", func(c *fiber.Ctx) error {
 		if websocket.IsWebSocketUpgrade(c) {
 			c.Locals("allowed", true)
@@ -599,7 +611,8 @@ func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else if strings.HasPrefix(r.URL.Path, "/socket.io/") {
-		fs := http.StripPrefix("/socket.io/", http.FileServer(http.Dir("../client-dist")))
+		clientDistFs, _ := fs.Sub(staticFS, "client-dist")
+		fs := http.StripPrefix("/socket.io/", http.FileServer(http.FS(clientDistFs)))
 		fs.ServeHTTP(w, r)
 	} else {
 		http.NotFound(w, r)
