@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -68,7 +70,9 @@ func New() *Io {
 }
 
 func (s *Io) Server(router fiber.Router) {
-	router.Static("/", "../client-dist")
+	_, filename, _, _ := runtime.Caller(0)
+	basepath := filepath.Join(filepath.Dir(filename), "client-dist")
+	router.Static("/", basepath)
 	router.Use("/", func(c *fiber.Ctx) error {
 		if websocket.IsWebSocketUpgrade(c) {
 			c.Locals("allowed", true)
@@ -599,7 +603,9 @@ func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else if strings.HasPrefix(r.URL.Path, "/socket.io/") {
-		fs := http.StripPrefix("/socket.io/", http.FileServer(http.Dir("../client-dist")))
+		_, filename, _, _ := runtime.Caller(0)
+		basepath := filepath.Join(filepath.Dir(filename), "client-dist")
+		fs := http.StripPrefix("/socket.io/", http.FileServer(http.Dir(basepath)))
 		fs.ServeHTTP(w, r)
 	} else {
 		http.NotFound(w, r)

@@ -128,7 +128,6 @@ func usingWithGin() {
 func httpServer() {
 	io := socketio.New()
 	socketIoHandle(io)
-
 	http.Handle("/socket.io/", io.HttpHandler())
 	http.Handle("/", http.FileServer(http.Dir("./public")))
 	fmt.Println("Server listenning on port 3300 ...")
@@ -136,7 +135,7 @@ func httpServer() {
 }
 
 func main() {
-	// httpServer()
-	usingWithGoFiber()
+	httpServer()
+	// usingWithGoFiber()
 	// usingWithGin()
 }
