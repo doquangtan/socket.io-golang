@@ -15,13 +15,13 @@
 Install the package with:
 
 ```bash
-go get github.com/doquangtan/socket.io/v4
+go get github.com/doquangtan/socketio/v4
 ```
 
 Import it with:
 
 ```go
-import "github.com/doquangtan/socket.io/v4"
+import "github.com/doquangtan/socketio/v4"
 ```
 
 and use `socketio` as the package name inside the code.
@@ -39,7 +39,7 @@ Using with standard library [net/http](https://pkg.go.dev/net/http)
 ```go
 import (
 	"net/http"
-	socketio "github.com/doquangtan/socket.io/v4"
+	socketio "github.com/doquangtan/socketio/v4"
 )
 
 func main() {
@@ -59,7 +59,7 @@ Using with web-framework [Gin](https://github.com/gin-gonic/gin)
 ```go
 import (
 	"github.com/gin-gonic/gin"
-	socketio "github.com/doquangtan/socket.io/v4"
+	socketio "github.com/doquangtan/socketio/v4"
 )
 
 func main() {
@@ -80,7 +80,7 @@ Using with web-framework [Go Fiber](https://gofiber.io)
 ```go
 import (
 	"github.com/gofiber/fiber/v2"
-	socketio "github.com/doquangtan/socket.io/v4"
+	socketio "github.com/doquangtan/socketio/v4"
 )
 
 func main() {
@@ -312,4 +312,4 @@ socket.On("room 237", func(event *socketio.EventPayload) {
 
 # Example
 
-Please check more examples into folder in project for details. [Examples](https://github.com/doquangtan/socket.io-golang/tree/main/example)
+Please check more examples into folder in project for details. [Examples](https://github.com/doquangtan/socketio-golang/tree/main/example)

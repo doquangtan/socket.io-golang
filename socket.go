@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/doquangtan/socket.io/v4/engineio"
-	"github.com/doquangtan/socket.io/v4/socket_protocol"
+	"github.com/doquangtan/socketio/v4/engineio"
+	"github.com/doquangtan/socketio/v4/socket_protocol"
 	"github.com/gofiber/websocket/v2"
 	gWebsocket "github.com/gorilla/websocket"
 )

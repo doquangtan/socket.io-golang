@@ -8,15 +8,15 @@ IF %func%==public (
 
     git pull
 
-    git tag -a %version% -m "v4.0.11: \n- Fixed issues with using socket..Emit() concurrently. \n- Added file server for net/http"
+    git tag -a %version% -m "v4.1.0: Rename module path to github.com/doquangtan/socketio/v4"
 
     git push origin %version%
 
     SET GOPROXY=proxy.golang.org
 
-    go list -m github.com/doquangtan/socket.io/v4@%version%
+    go list -m github.com/doquangtan/socketio/v4@%version%
     
     echo Done %func%
 )
 
-@REM make public v4.0.11
+@REM make public v4.1.0

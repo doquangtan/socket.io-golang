@@ -1,7 +1,7 @@
 public:
 	git checkout v4
 	git pull
-	git tag -a v4.0.11 -m "v4.0.11: \n- Fixed issues with using socket..Emit() concurrently. \n- Added file server for net/http"
-	git push origin v4.0.11
+	git tag -a v4.1.0 -m "v4.1.0: Rename module path to github.com/doquangtan/socketio/v4"
+	git push origin v4.1.0
 	env GOPROXY=proxy.golang.org
-	go list -m github.com/doquangtan/socket.io/v4@v4.0.11
+	go list -m github.com/doquangtan/socketio/v4@v4.1.0
