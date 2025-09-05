@@ -96,7 +96,10 @@ func (s *Io) Middleware(c *fiber.Ctx) error {
 }
 
 func (s *Io) FiberRoute(router fiber.Router) {
-	router.Static("/", "../client-dist")
+	clientDistFs, _ := fs.Sub(staticFS, "client-dist")
+	router.Use("/", filesystem.New(filesystem.Config{
+		Root: http.FS(clientDistFs),
+	}))
 	router.Use("/", func(c *fiber.Ctx) error {
 		if websocket.IsWebSocketUpgrade(c) {
 			c.Locals("allowed", true)
