@@ -2,7 +2,7 @@
 
 # golang socket.io
 
-- socket.io is library an implementation of [Socket.IO](http://socket.io) in Golang, which is a realtime application framework.
+- [socket.io](https://github.com/doquangtan/socketio/v4) is library an implementation of [Socket.IO](http://socket.io) in Golang, which is a realtime application framework.
 - This library support socket.io-client version 3, 4 and only support websocket transport
 
 # Contents
