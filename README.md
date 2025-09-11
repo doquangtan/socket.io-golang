@@ -313,3 +313,7 @@ socket.On("room 237", func(event *socketio.EventPayload) {
 # Example
 
 Please check more examples into folder in project for details. [Examples](https://github.com/doquangtan/socketio-golang/tree/main/example)
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=doquangtan/socket.io-golang&type=Date)](https://www.star-history.com/#doquangtan/socket.io-golang&Date)
