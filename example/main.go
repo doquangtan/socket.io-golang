@@ -110,7 +110,7 @@ func usingWithGoFiber() {
 
 	app := fiber.New(fiber.Config{})
 	app.Static("/", "./public")
-	app.Use("/", io.Middleware)
+	app.Use("/", io.FiberMiddleware)
 	app.Route("/socket.io", io.FiberRoute)
 	app.Listen(":3300")
 }
@@ -136,6 +136,15 @@ func httpServer() {
 
 func main() {
 	// httpServer()
-	usingWithGoFiber()
 	// usingWithGin()
+
+	socketClientTest()
+
+	usingWithGoFiber()
+
+}
+
+func socketClientTest() {
+	socket := socketio.Connect()
+	log.Println(socket)
 }

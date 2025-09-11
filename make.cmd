@@ -8,7 +8,7 @@ IF %func%==public (
 
     git pull
 
-    git tag -a %version% -m "v4.1.4: - Fixed error not found socket.io.min.js when get that file from package directory."
+    git tag -a %version% -m "v4.1.5: - Fixed bug route use filesystem for result client-dist block websocket upgrade."
 
     git push origin %version%
 
@@ -19,4 +19,4 @@ IF %func%==public (
     echo Done %func%
 )
 
-@REM make public v4.1.4
+@REM make public v4.1.5

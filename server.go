@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/doquangtan/socketio/v4/client"
 	"github.com/doquangtan/socketio/v4/engineio"
 	"github.com/doquangtan/socketio/v4/socket_protocol"
 	"github.com/gofiber/fiber/v2"
@@ -21,6 +22,11 @@ import (
 
 	gWebsocket "github.com/gorilla/websocket"
 )
+
+// Create socket-client
+func Connect() *client.Io {
+	return client.New()
+}
 
 //go:embed client-dist/*
 var staticFS embed.FS
@@ -75,13 +81,13 @@ func New() *Io {
 
 func (s *Io) Server(router fiber.Router) {
 	clientDistFs, _ := fs.Sub(staticFS, "client-dist")
-	router.Use("/", filesystem.New(filesystem.Config{
-		Root: http.FS(clientDistFs),
-	}))
 	router.Use("/", func(c *fiber.Ctx) error {
 		if websocket.IsWebSocketUpgrade(c) {
 			c.Locals("allowed", true)
 			return c.Next()
+		} else if strings.HasPrefix(c.Path(), "/socket.io/") {
+			fileName := strings.Replace(c.Path(), "/socket.io/", "", 1)
+			return filesystem.SendFile(c, http.FS(clientDistFs), fileName)
 		}
 		return fiber.ErrUpgradeRequired
 	})
@@ -97,13 +103,13 @@ func (s *Io) Middleware(c *fiber.Ctx) error {
 
 func (s *Io) FiberRoute(router fiber.Router) {
 	clientDistFs, _ := fs.Sub(staticFS, "client-dist")
-	router.Use("/", filesystem.New(filesystem.Config{
-		Root: http.FS(clientDistFs),
-	}))
 	router.Use("/", func(c *fiber.Ctx) error {
 		if websocket.IsWebSocketUpgrade(c) {
 			c.Locals("allowed", true)
 			return c.Next()
+		} else if strings.HasPrefix(c.Path(), "/socket.io/") {
+			fileName := strings.Replace(c.Path(), "/socket.io/", "", 1)
+			return filesystem.SendFile(c, http.FS(clientDistFs), fileName)
 		}
 		return fiber.ErrUpgradeRequired
 	})
