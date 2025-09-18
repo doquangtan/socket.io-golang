@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/doquangtan/socketio/v4"
 	"github.com/gin-contrib/static"
@@ -26,20 +27,26 @@ func socketIoHandle(io *socketio.Io) {
 		io.To("demo").Emit("test", socket.Id+" join us room...", "server message")
 
 		socket.On("connected", func(event *socketio.EventPayload) {
-			go func() {
-				socket.Emit("chat message", "Main 1")
-			}()
-			go func() {
-				socket.Emit("chat message", "Main 2")
-			}()
-			go func() {
-				socket.Emit("chat message", "Main 3")
-			}()
-			go func() {
-				socket.Emit("chat message", "Main 4")
-			}()
+			for i := 0; i < 100; i++ {
+				go func() {
+					socket.Emit("chat message", "Main concurrent 1_"+strconv.Itoa(i))
+				}()
+				go func() {
+					socket.Emit("chat message", "Main concurrent 2_"+strconv.Itoa(i))
+				}()
+				go func() {
+					socket.Emit("chat message", "Main concurrent 3_"+strconv.Itoa(i))
+				}()
+				go func() {
+					socket.Emit("chat message", "Main concurrent 4_"+strconv.Itoa(i))
+				}()
+				go func() {
+					socket.Emit("chat message", "Main concurrent 5_"+strconv.Itoa(i))
+				}()
+			}
 		})
 		socket.On("test", func(event *socketio.EventPayload) {
+			log.Println("Test: ", event.Data)
 			socket.Emit("test", event.Data...)
 		})
 
@@ -85,7 +92,7 @@ func socketIoHandle(io *socketio.Io) {
 		})
 	})
 
-	io.Of("/test").OnConnection(func(socket *socketio.Socket) {
+	io.Of("/hello").OnConnection(func(socket *socketio.Socket) {
 		println("connect", socket.Nps, socket.Id)
 
 		socket.On("chat message", func(event *socketio.EventPayload) {
@@ -125,6 +132,43 @@ func usingWithGin() {
 	router.Run(":3300")
 }
 
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*") // Allow all origins
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+
+		// Handle preflight OPTIONS request
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func httpServerWithCors() {
+	io := socketio.New()
+	socketIoHandle(io)
+
+	mux := http.NewServeMux()
+	corsHandler := corsMiddleware(io.HttpHandler())
+	mux.Handle("/socket.io/", corsHandler)
+	// http.Handle("/socket.io/", io.HttpHandler())
+	mux.Handle("/", http.FileServer(http.Dir("./public")))
+
+	server := &http.Server{
+		Addr:    ":3300",
+		Handler: mux,
+	}
+
+	fmt.Println("Server listenning on port 3300 ...")
+	fmt.Println(server.ListenAndServe())
+}
+
 func httpServer() {
 	io := socketio.New()
 	socketIoHandle(io)
@@ -136,11 +180,12 @@ func httpServer() {
 
 func main() {
 	// httpServer()
+	httpServerWithCors()
 	// usingWithGin()
 
-	socketClientTest()
+	// socketClientTest()
 
-	usingWithGoFiber()
+	// usingWithGoFiber()
 
 }
 

@@ -8,7 +8,7 @@ IF %func%==public (
 
     git pull
 
-    git tag -a %version% -m "v4.1.5: - Fixed bug route use filesystem for result client-dist block websocket upgrade."
+    git tag -a %version% -m "v4.1.6: - Fixed concurrent write not Lock Mutex when Ping to client."
 
     git push origin %version%
 
@@ -19,4 +19,4 @@ IF %func%==public (
     echo Done %func%
 )
 
-@REM make public v4.1.5
+@REM make public v4.1.6

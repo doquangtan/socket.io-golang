@@ -125,10 +125,10 @@ Client: ([example javascript client](https://socket.io/docs/v4/client-api/#iourl
 
 ```javascript
 var socket = io("/", {
-  transports: ["websocket"],
-  auth: {
-    token: "123",
-  },
+	transports: ["websocket"],
+	auth: {
+		token: "123",
+	},
 });
 ```
 
@@ -312,7 +312,7 @@ socket.On("room 237", func(event *socketio.EventPayload) {
 
 # Example
 
-Please check more examples into folder in project for details. [Examples](https://github.com/doquangtan/socketio-golang/tree/main/example)
+Please check more examples into folder in project for details. [Examples](https://github.com/doquangtan/socket.io-golang/tree/main/example)
 
 # Star History
 
