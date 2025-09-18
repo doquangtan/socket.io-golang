@@ -17,7 +17,7 @@ type Conn struct {
 	http     *gWebsocket.Conn
 }
 
-func (c *Conn) NextWriter(messageType int) (io.WriteCloser, error) {
+func (c *Conn) nextWriter(messageType int) (io.WriteCloser, error) {
 	if c.http != nil {
 		return c.http.NextWriter(messageType)
 	}
@@ -27,7 +27,7 @@ func (c *Conn) NextWriter(messageType int) (io.WriteCloser, error) {
 	return nil, errors.New("not found http or fasthttp socket")
 }
 
-func (c *Conn) SetReadDeadline(t time.Time) error {
+func (c *Conn) setReadDeadline(t time.Time) error {
 	if c.http != nil {
 		return c.http.SetReadDeadline(t)
 	}
@@ -37,7 +37,7 @@ func (c *Conn) SetReadDeadline(t time.Time) error {
 	return errors.New("not found http or fasthttp socket")
 }
 
-func (c *Conn) Close() error {
+func (c *Conn) close() error {
 	if c.http != nil {
 		return c.http.Close()
 	}
@@ -88,13 +88,12 @@ func (s *Socket) Ping() error {
 	if c == nil {
 		return errors.New("socket has disconnected")
 	}
-	w, err := c.NextWriter(websocket.TextMessage)
+	err := s.engineWrite(engineio.PING)
 	if err != nil {
-		c.Close()
+		c.close()
 		return err
 	}
-	engineio.WriteByte(w, engineio.PING, []byte{})
-	return w.Close()
+	return nil
 }
 
 func (s *Socket) Disconnect() error {
@@ -103,7 +102,7 @@ func (s *Socket) Disconnect() error {
 		return errors.New("socket has disconnected")
 	}
 	s.writer(socket_protocol.DISCONNECT)
-	return c.SetReadDeadline(time.Now())
+	return c.setReadDeadline(time.Now())
 }
 
 func (s *Socket) Rooms() []string {
@@ -111,7 +110,7 @@ func (s *Socket) Rooms() []string {
 }
 
 func (s *Socket) disconnect() {
-	s.Conn.Close()
+	s.Conn.close()
 	s.Conn = nil
 	// s.rooms = []string{}
 	if len(s.dispose) > 0 {
@@ -124,7 +123,7 @@ func (s *Socket) disconnect() {
 func (s *Socket) engineWrite(t engineio.PacketType, arg ...interface{}) error {
 	s.Lock()
 	defer s.Unlock()
-	w, err := s.Conn.NextWriter(websocket.TextMessage)
+	w, err := s.Conn.nextWriter(websocket.TextMessage)
 	if err != nil {
 		return err
 	}
@@ -135,7 +134,7 @@ func (s *Socket) engineWrite(t engineio.PacketType, arg ...interface{}) error {
 func (s *Socket) writer(t socket_protocol.PacketType, arg ...interface{}) error {
 	s.Lock()
 	defer s.Unlock()
-	w, err := s.Conn.NextWriter(websocket.TextMessage)
+	w, err := s.Conn.nextWriter(websocket.TextMessage)
 	if err != nil {
 		return err
 	}

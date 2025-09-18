@@ -79,26 +79,73 @@ func New() *Io {
 	return io
 }
 
-func (s *Io) Server(router fiber.Router) {
-	clientDistFs, _ := fs.Sub(staticFS, "client-dist")
-	router.Use("/", func(c *fiber.Ctx) error {
-		if websocket.IsWebSocketUpgrade(c) {
-			c.Locals("allowed", true)
-			return c.Next()
-		} else if strings.HasPrefix(c.Path(), "/socket.io/") {
-			fileName := strings.Replace(c.Path(), "/socket.io/", "", 1)
-			return filesystem.SendFile(c, http.FS(clientDistFs), fileName)
+var upgrader = gWebsocket.Upgrader{}
+
+func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	header := r.Header
+	if slices.Contains(header["Connection"], "Upgrade") && header.Get("Upgrade") == "websocket" {
+		upgrader.CheckOrigin = func(r *http.Request) bool { return true }
+		c, err := upgrader.Upgrade(w, r, nil)
+
+		if err != nil {
+			log.Print("Upgrade:", err)
+			return
 		}
-		return fiber.ErrUpgradeRequired
-	})
-	router.Get("/", s.new())
+		defer c.Close()
+
+		if r.URL.Query()["sid"] != nil {
+			return
+		}
+
+		socket := Socket{
+			Id:  s.randomUUID(),
+			Nps: "/",
+			Conn: &Conn{
+				http: c,
+			},
+			listeners: listeners{
+				list: make(map[string][]eventCallback),
+			},
+			pingTime: s.pingInterval,
+		}
+		defer socket.disconnect()
+		socket.dispose = append(socket.dispose, func() {
+			s.sockets.delete(socket.Id)
+		})
+		s.sockets.set(&socket)
+
+		socket.engineWrite(engineio.OPEN, engineio.ConnParameters{
+			SID:          socket.Id,
+			PingInterval: s.pingInterval,
+			PingTimeout:  s.pingTimeout,
+			MaxPayload:   s.maxPayload,
+			Upgrades:     []string{"websocket"},
+		}.ToJson())
+
+		for {
+			messageType, message, err := c.ReadMessage()
+			if err != nil {
+				break
+			}
+
+			if messageType == websocket.TextMessage {
+				err := s.handlerMessage(&socket, string(message))
+				if err != nil {
+					return
+				}
+			}
+		}
+	} else if strings.HasPrefix(r.URL.Path, "/socket.io/") {
+		clientDistFs, _ := fs.Sub(staticFS, "client-dist")
+		fs := http.StripPrefix("/socket.io/", http.FileServer(http.FS(clientDistFs)))
+		fs.ServeHTTP(w, r)
+	} else {
+		http.NotFound(w, r)
+	}
 }
 
-func (s *Io) Middleware(c *fiber.Ctx) error {
-	if c.Locals("io") == nil {
-		c.Locals("io", s)
-	}
-	return c.Next()
+func (s *Io) HttpHandler() http.Handler {
+	return s
 }
 
 func (s *Io) FiberRoute(router fiber.Router) {
@@ -267,364 +314,177 @@ func (s *Io) new() func(ctx *fiber.Ctx) error {
 			}
 
 			if messageType == websocket.TextMessage {
-				enginePacketType := string(message[0:1])
-				switch enginePacketType {
-				case engineio.MESSAGE.String():
-					mess := string(message)
-					packetType := string(message[1:2])
-					rawpayload := string(message[2:])
-
-					endNamespace := -1
-					startPayload := -1
-					ackId := ""
-
-					special1 := strings.Index(mess, "{")
-					special2 := strings.Index(mess, "[")
-					special3 := -1
-					nextMess := message
-
-					for {
-						nextSpecial3 := strings.Index(string(nextMess), ",")
-						if nextSpecial3 == -1 || (special1 != -1 && nextSpecial3 > special1) || (special2 != -1 && nextSpecial3 > special2) {
-							break
-						}
-						nextMess = nextMess[nextSpecial3+1:]
-						special3 = nextSpecial3
-					}
-
-					if special3 != -1 {
-						endNamespace = special3
-					}
-
-					startPayload = endNamespace
-					if special2 != -1 {
-						startPayload = special2 - 1
-					} else if special1 != -1 {
-						startPayload = special1 - 1
-					}
-
-					if special3 != -1 && special2 != -1 && (special2-1 != special3) {
-						ackId = string(message[special3+1 : special2])
-					} else if special2 != -1 && special2 != 2 {
-						ackId = string(message[2:special2])
-					}
-
-					namespace := "/"
-					if endNamespace != -1 {
-						namespace = string(message[2:endNamespace])
-					}
-
-					if startPayload != -1 {
-						rawpayload = string(message[startPayload+1:])
-					}
-
-					switch packetType {
-					case socket_protocol.DISCONNECT.String():
-						socket_nps, err := s.Of(namespace).sockets.get(socket.Id)
-						if err != nil {
-							return
-						}
-						for _, callback := range socket_nps.listeners.get("disconnecting") {
-							callback(&EventPayload{
-								SID:    socket.Id,
-								Name:   "disconnecting",
-								Socket: socket_nps,
-								Error:  nil,
-								Data:   []interface{}{},
-							})
-						}
-					case socket_protocol.CONNECT.String():
-						socket_nps := &socket
-						if namespace != "/" {
-							socketWithNamespace := Socket{
-								Id:   socket.Id,
-								Nps:  namespace,
-								Conn: socket.Conn,
-								listeners: listeners{
-									list: make(map[string][]eventCallback),
-								},
-								pingTime: s.pingInterval,
-							}
-							socket_nps = &socketWithNamespace
-
-							if nps := s.namespaces.get(namespace); nps == nil {
-								socket_nps.writer(socket_protocol.CONNECT_ERROR, map[string]interface{}{
-									"message": "Invalid namespace",
-								})
-								continue
-							}
-						}
-
-						if s.onAuthentication != nil {
-							dataJson := map[string]string{}
-							json.Unmarshal([]byte(rawpayload), &dataJson)
-							if !s.onAuthentication(dataJson) {
-								socket_nps.writer(socket_protocol.CONNECT_ERROR, map[string]interface{}{
-									"message": "Not authenticated",
-								})
-								continue
-							}
-						}
-
-						socket.dispose = append(socket.dispose, func() {
-							s.Of(namespace).socketLeaveAllRooms(socket_nps)
-							s.Of(namespace).sockets.delete(socket_nps.Id)
-							for _, callback := range socket_nps.listeners.get("disconnect") {
-								callback(&EventPayload{
-									SID:    socket_nps.Id,
-									Name:   "disconnect",
-									Socket: socket_nps,
-									Error:  nil,
-									Data:   []interface{}{},
-								})
-							}
-						})
-						s.Of(namespace).sockets.set(socket_nps)
-						socket_nps.Join = func(room string) {
-							s.Of(namespace).socketJoinRoom(room, socket_nps)
-						}
-						socket_nps.Leave = func(room string) {
-							s.Of(namespace).socketLeaveRoom(room, socket_nps)
-						}
-						socket_nps.To = func(room string) *Room {
-							return s.Of(namespace).To(room)
-						}
-
-						socket_nps.writer(socket_protocol.CONNECT, engineio.ConnParameters{
-							SID: socket.Id,
-						}.ToJson())
-
-						for _, callback := range s.Of(namespace).onConnection.get("connection") {
-							callback(socket_nps)
-						}
-					case socket_protocol.EVENT.String():
-						socket_nps, err := s.Of(namespace).sockets.get(socket.Id)
-						if err != nil {
-							return
-						}
-						if socket.Conn != nil {
-							s.readChan <- payload{
-								socket: socket_nps,
-								data:   rawpayload,
-								ackId:  ackId,
-							}
-						}
-					}
-				case engineio.PONG.String():
-					// println("Client pong")
+				err := s.handlerMessage(&socket, string(message))
+				if err != nil {
+					return
 				}
 			}
 		}
 	})
 }
 
-var upgrader = gWebsocket.Upgrader{}
+func (s *Io) handlerMessage(socket *Socket, message string) error {
+	enginePacketType := string(message[0:1])
+	switch enginePacketType {
+	case engineio.MESSAGE.String():
+		mess := string(message)
+		packetType := string(message[1:2])
+		rawpayload := string(message[2:])
 
-func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	header := r.Header
-	if slices.Contains(header["Connection"], "Upgrade") && header.Get("Upgrade") == "websocket" {
-		upgrader.CheckOrigin = func(r *http.Request) bool { return true }
-		c, err := upgrader.Upgrade(w, r, nil)
+		endNamespace := -1
+		startPayload := -1
+		ackId := ""
 
-		if err != nil {
-			log.Print("Upgrade:", err)
-			return
-		}
-		defer c.Close()
-
-		if r.URL.Query()["sid"] != nil {
-			return
-		}
-
-		socket := Socket{
-			Id:  s.randomUUID(),
-			Nps: "/",
-			Conn: &Conn{
-				http: c,
-			},
-			listeners: listeners{
-				list: make(map[string][]eventCallback),
-			},
-			pingTime: s.pingInterval,
-		}
-		defer socket.disconnect()
-		socket.dispose = append(socket.dispose, func() {
-			s.sockets.delete(socket.Id)
-		})
-		s.sockets.set(&socket)
-
-		socket.engineWrite(engineio.OPEN, engineio.ConnParameters{
-			SID:          socket.Id,
-			PingInterval: s.pingInterval,
-			PingTimeout:  s.pingTimeout,
-			MaxPayload:   s.maxPayload,
-			Upgrades:     []string{"websocket"},
-		}.ToJson())
+		special1 := strings.Index(mess, "{")
+		special2 := strings.Index(mess, "[")
+		special3 := -1
+		nextMess := message
 
 		for {
-			messageType, message, err := c.ReadMessage()
-			if err != nil {
+			nextSpecial3 := strings.Index(string(nextMess), ",")
+			if nextSpecial3 == -1 || (special1 != -1 && nextSpecial3 > special1) || (special2 != -1 && nextSpecial3 > special2) {
 				break
 			}
+			nextMess = nextMess[nextSpecial3+1:]
+			special3 = nextSpecial3
+		}
 
-			if messageType == websocket.TextMessage {
-				enginePacketType := string(message[0:1])
-				switch enginePacketType {
-				case engineio.MESSAGE.String():
-					mess := string(message)
-					packetType := string(message[1:2])
-					rawpayload := string(message[2:])
+		if special3 != -1 {
+			endNamespace = special3
+		}
 
-					endNamespace := -1
-					startPayload := -1
-					ackId := ""
+		startPayload = endNamespace
+		if special2 != -1 {
+			startPayload = special2 - 1
+		} else if special1 != -1 {
+			startPayload = special1 - 1
+		}
 
-					special1 := strings.Index(mess, "{")
-					special2 := strings.Index(mess, "[")
-					special3 := -1
-					nextMess := message
+		if special3 != -1 && special2 != -1 && (special2-1 != special3) {
+			ackId = string(message[special3+1 : special2])
+		} else if special2 != -1 && special2 != 2 {
+			ackId = string(message[2:special2])
+		}
 
-					for {
-						nextSpecial3 := strings.Index(string(nextMess), ",")
-						if nextSpecial3 == -1 || (special1 != -1 && nextSpecial3 > special1) || (special2 != -1 && nextSpecial3 > special2) {
-							break
-						}
-						nextMess = nextMess[nextSpecial3+1:]
-						special3 = nextSpecial3
-					}
+		namespace := "/"
+		if endNamespace != -1 {
+			namespace = string(message[2:endNamespace])
+		}
 
-					if special3 != -1 {
-						endNamespace = special3
-					}
+		if startPayload != -1 {
+			rawpayload = string(message[startPayload+1:])
+		}
 
-					startPayload = endNamespace
-					if special2 != -1 {
-						startPayload = special2 - 1
-					} else if special1 != -1 {
-						startPayload = special1 - 1
-					}
+		switch packetType {
+		case socket_protocol.DISCONNECT.String():
+			socket_nps, err := s.Of(namespace).sockets.get(socket.Id)
+			if err != nil {
+				return err
+			}
+			for _, callback := range socket_nps.listeners.get("disconnecting") {
+				callback(&EventPayload{
+					SID:    socket.Id,
+					Name:   "disconnecting",
+					Socket: socket_nps,
+					Error:  nil,
+					Data:   []interface{}{},
+				})
+			}
+		case socket_protocol.CONNECT.String():
+			socket_nps := socket
+			if namespace != "/" {
+				socketWithNamespace := Socket{
+					Id:   socket.Id,
+					Nps:  namespace,
+					Conn: socket.Conn,
+					listeners: listeners{
+						list: make(map[string][]eventCallback),
+					},
+					pingTime: s.pingInterval,
+				}
+				socket_nps = &socketWithNamespace
 
-					if special3 != -1 && special2 != -1 && (special2-1 != special3) {
-						ackId = string(message[special3+1 : special2])
-					} else if special2 != -1 && special2 != 2 {
-						ackId = string(message[2:special2])
-					}
-
-					namespace := "/"
-					if endNamespace != -1 {
-						namespace = string(message[2:endNamespace])
-					}
-
-					if startPayload != -1 {
-						rawpayload = string(message[startPayload+1:])
-					}
-
-					switch packetType {
-					case socket_protocol.DISCONNECT.String():
-						socket_nps, err := s.Of(namespace).sockets.get(socket.Id)
-						if err != nil {
-							return
-						}
-						for _, callback := range socket_nps.listeners.get("disconnecting") {
-							callback(&EventPayload{
-								SID:    socket.Id,
-								Name:   "disconnecting",
-								Socket: socket_nps,
-								Error:  nil,
-								Data:   []interface{}{},
-							})
-						}
-					case socket_protocol.CONNECT.String():
-						socket_nps := &socket
-						if namespace != "/" {
-							socketWithNamespace := Socket{
-								Id:   socket.Id,
-								Nps:  namespace,
-								Conn: socket.Conn,
-								listeners: listeners{
-									list: make(map[string][]eventCallback),
-								},
-								pingTime: s.pingInterval,
-							}
-							socket_nps = &socketWithNamespace
-
-							if nps := s.namespaces.get(namespace); nps == nil {
-								socket_nps.writer(socket_protocol.CONNECT_ERROR, map[string]interface{}{
-									"message": "Invalid namespace",
-								})
-								continue
-							}
-						}
-
-						if s.onAuthentication != nil {
-							dataJson := map[string]string{}
-							json.Unmarshal([]byte(rawpayload), &dataJson)
-							if !s.onAuthentication(dataJson) {
-								socket_nps.writer(socket_protocol.CONNECT_ERROR, map[string]interface{}{
-									"message": "Not authenticated",
-								})
-								continue
-							}
-						}
-
-						socket.dispose = append(socket.dispose, func() {
-							s.Of(namespace).socketLeaveAllRooms(socket_nps)
-							s.Of(namespace).sockets.delete(socket_nps.Id)
-							for _, callback := range socket_nps.listeners.get("disconnect") {
-								callback(&EventPayload{
-									SID:    socket_nps.Id,
-									Name:   "disconnect",
-									Socket: socket_nps,
-									Error:  nil,
-									Data:   []interface{}{},
-								})
-							}
-						})
-						s.Of(namespace).sockets.set(socket_nps)
-						socket_nps.Join = func(room string) {
-							s.Of(namespace).socketJoinRoom(room, socket_nps)
-						}
-						socket_nps.Leave = func(room string) {
-							s.Of(namespace).socketLeaveRoom(room, socket_nps)
-						}
-						socket_nps.To = func(room string) *Room {
-							return s.Of(namespace).To(room)
-						}
-
-						socket_nps.writer(socket_protocol.CONNECT, engineio.ConnParameters{
-							SID: socket.Id,
-						}.ToJson())
-
-						for _, callback := range s.Of(namespace).onConnection.get("connection") {
-							callback(socket_nps)
-						}
-					case socket_protocol.EVENT.String():
-						socket_nps, err := s.Of(namespace).sockets.get(socket.Id)
-						if err != nil {
-							return
-						}
-						if socket.Conn != nil {
-							s.readChan <- payload{
-								socket: socket_nps,
-								data:   rawpayload,
-								ackId:  ackId,
-							}
-						}
-					}
-				case engineio.PONG.String():
-					// println("Client pong")
+				if nps := s.namespaces.get(namespace); nps == nil {
+					socket_nps.writer(socket_protocol.CONNECT_ERROR, map[string]interface{}{
+						"message": "Invalid namespace",
+					})
+					// continue
+					return nil
 				}
 			}
-		}
-	} else if strings.HasPrefix(r.URL.Path, "/socket.io/") {
-		clientDistFs, _ := fs.Sub(staticFS, "client-dist")
-		fs := http.StripPrefix("/socket.io/", http.FileServer(http.FS(clientDistFs)))
-		fs.ServeHTTP(w, r)
-	} else {
-		http.NotFound(w, r)
-	}
-}
 
-func (s *Io) HttpHandler() http.Handler {
-	return s
+			if s.onAuthentication != nil {
+				dataJson := map[string]string{}
+				json.Unmarshal([]byte(rawpayload), &dataJson)
+				if !s.onAuthentication(dataJson) {
+					socket_nps.writer(socket_protocol.CONNECT_ERROR, map[string]interface{}{
+						"message": "Not authenticated",
+					})
+					// continue
+					return nil
+				}
+			}
+
+			socket.dispose = append(socket.dispose, func() {
+				s.Of(namespace).socketLeaveAllRooms(socket_nps)
+				s.Of(namespace).sockets.delete(socket_nps.Id)
+				for _, callback := range socket_nps.listeners.get("disconnect") {
+					callback(&EventPayload{
+						SID:    socket_nps.Id,
+						Name:   "disconnect",
+						Socket: socket_nps,
+						Error:  nil,
+						Data:   []interface{}{},
+					})
+				}
+			})
+			s.Of(namespace).sockets.set(socket_nps)
+			socket_nps.Join = func(room string) {
+				s.Of(namespace).socketJoinRoom(room, socket_nps)
+			}
+			socket_nps.Leave = func(room string) {
+				s.Of(namespace).socketLeaveRoom(room, socket_nps)
+			}
+			socket_nps.To = func(room string) *Room {
+				return s.Of(namespace).To(room)
+			}
+
+			socket_nps.writer(socket_protocol.CONNECT, engineio.ConnParameters{
+				SID: socket.Id,
+			}.ToJson())
+
+			for _, callback := range s.Of(namespace).onConnection.get("connection") {
+				callback(socket_nps)
+			}
+		case socket_protocol.EVENT.String():
+			socket_nps, err := s.Of(namespace).sockets.get(socket.Id)
+			if err != nil {
+				return err
+			}
+			if socket.Conn != nil {
+				s.readChan <- payload{
+					socket: socket_nps,
+					data:   rawpayload,
+					ackId:  ackId,
+				}
+			}
+			// case socket_protocol.BINARY_EVENT.String():
+			// 	socket_nps, err := s.Of(namespace).sockets.get(socket.Id)
+			// 	if err != nil {
+			// 		return err
+			// 	}
+			// 	log.Println("Debug: ", rawpayload)
+			// 	if socket.Conn != nil {
+			// 		s.readChan <- payload{
+			// 			socket: socket_nps,
+			// 			data:   rawpayload,
+			// 			ackId:  ackId,
+			// 		}
+			// 	}
+			// case socket_protocol.BINARY_ACK.String():
+		}
+	case engineio.PONG.String():
+		// println("Client pong")
+	}
+	return nil
 }
