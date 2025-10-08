@@ -83,7 +83,7 @@ var upgrader = gWebsocket.Upgrader{}
 
 func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	header := r.Header
-	if slices.Contains(header["Connection"], "Upgrade") && header.Get("Upgrade") == "websocket" {
+	if slices.ContainsFunc(header["Connection"], func(s string) bool { return strings.Contains(s,"Upgrade") }) && header.Get("Upgrade") == "websocket" {
 		upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 		c, err := upgrader.Upgrade(w, r, nil)
 
