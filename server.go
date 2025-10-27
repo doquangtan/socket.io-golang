@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/doquangtan/socketio/v4/client"
@@ -104,33 +105,54 @@ func New(fns ...optionFn) *Io {
 var upgrader = gWebsocket.Upgrader{}
 
 func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[+] HTTP header: %+v", r.Header)
+	log.Printf("[+] HTTP query: %+v", r.URL.Query())
+
 	header := r.Header
 	if slices.Contains(header["Connection"], "Upgrade") && header.Get("Upgrade") == "websocket" {
+		// if true {
+		log.Println("conection:upgrade")
+
 		upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 		c, err := upgrader.Upgrade(w, r, nil)
-
 		if err != nil {
 			log.Print("Upgrade:", err)
 			return
 		}
 		defer c.Close()
 
+		// var id string
+
 		if r.URL.Query()["sid"] != nil {
+			log.Print("sid presented ! ")
+
 			return
+			// Still allows it ?
 		}
+		// log.Println("SID:", id)
 
 		socket := Socket{
 			Id:  s.randomUUID(),
 			Nps: "/",
 			Conn: &Conn{
-				http: c,
+				http:       c,
+				reqHeaders: r.Header.Clone(),
+				reqQuery:   cloneValues(r.URL.Query()),
+				data:       &atomic.Pointer[any]{},
 			},
+
 			listeners: listeners{
 				list: make(map[string][]eventCallback),
 			},
 			pingTime: s.pingInterval,
 		}
-		defer socket.disconnect()
+
+		defer func() {
+			log.Printf("socket %q closed", socket.Id)
+
+			socket.disconnect()
+		}()
+
 		socket.dispose = append(socket.dispose, func() {
 			s.sockets.delete(socket.Id)
 		})
