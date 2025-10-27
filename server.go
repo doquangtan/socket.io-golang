@@ -47,9 +47,30 @@ type Io struct {
 	onAuthentication func(params map[string]string) bool
 	onConnection     connectionEvent
 	close            chan interface{}
+
+	path string
 }
 
-func New() *Io {
+type (
+	option struct {
+		path string
+	}
+	optionFn func(*option)
+)
+
+func SetPath(path string) optionFn { return func(opt *option) { opt.path = path } }
+
+func New(fns ...optionFn) *Io {
+	// Load sensible default value.
+	opt := option{
+		path: "/socket.io/",
+	}
+
+	// Overload them with user's provided ones.
+	for _, fn := range fns {
+		fn(&opt)
+	}
+
 	pingInterval := time.Duration(25000 * time.Millisecond)
 	pingTimeout := time.Duration(25000 * time.Millisecond)
 	maxPayload := 1000000
@@ -68,6 +89,7 @@ func New() *Io {
 		pingInterval: pingInterval,
 		pingTimeout:  pingTimeout,
 		maxPayload:   maxPayload,
+		path:         opt.path,
 	}
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	go io.read(ctx)
@@ -122,24 +144,36 @@ func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Upgrades:     []string{"websocket"},
 		}.ToJson())
 
+		log.Printf("headers %q: %+v", socket.Id, socket.Conn.reqHeaders)
+		log.Printf("query %q: %+v", socket.Id, socket.Conn.reqQuery)
+
 		for {
 			messageType, message, err := c.ReadMessage()
 			if err != nil {
+				log.Printf("got error: %v\n", err)
 				break
 			}
 
 			if messageType == websocket.TextMessage {
 				err := s.handlerMessage(&socket, string(message))
 				if err != nil {
+					log.Printf("got error: %v\n", err)
+
 					return
 				}
 			}
 		}
-	} else if strings.HasPrefix(r.URL.Path, "/socket.io/") {
+	} else if strings.HasPrefix(r.URL.Path, s.path) {
+
+		log.Println("conection:path match")
+
 		clientDistFs, _ := fs.Sub(staticFS, "client-dist")
-		fs := http.StripPrefix("/socket.io/", http.FileServer(http.FS(clientDistFs)))
+		fs := http.StripPrefix(s.path, http.FileServer(http.FS(clientDistFs)))
 		fs.ServeHTTP(w, r)
 	} else {
+
+		log.Printf("conection:not found: got [%q] want [%q]", r.URL.Path, s.path)
+
 		http.NotFound(w, r)
 	}
 }
