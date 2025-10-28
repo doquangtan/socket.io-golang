@@ -3,6 +3,7 @@ package socketio
 import (
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sync"
@@ -73,8 +74,9 @@ func (c *Conn) close() error {
 
 type Socket struct {
 	sync.RWMutex
+
 	Id        string
-	Nps       string
+	Nsp       string
 	Conn      *Conn
 	rooms     roomNames
 	listeners listeners
@@ -134,6 +136,8 @@ func (s *Socket) Rooms() []string {
 }
 
 func (s *Socket) disconnect() {
+	log.Printf("[socket.io] closing socket %q", s.Id)
+
 	s.Conn.close()
 	s.Conn = nil
 	// s.rooms = []string{}
@@ -163,9 +167,10 @@ func (s *Socket) writer(t socket_protocol.PacketType, arg ...interface{}) error 
 		return err
 	}
 	nps := ""
-	if s.Nps != "/" {
-		nps = s.Nps + ","
+	if s.Nsp != "/" {
+		nps = s.Nsp + ","
 	}
+
 	if t == socket_protocol.ACK {
 		agrs := append([]interface{}{}, arg[0].([]interface{})[1:])
 		socket_protocol.WriteToWithAck(w, t, nps, arg[0].([]interface{})[0].(string), agrs...)

@@ -110,7 +110,6 @@ func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	header := r.Header
 	if slices.Contains(header["Connection"], "Upgrade") && header.Get("Upgrade") == "websocket" {
-		// if true {
 		log.Println("conection:upgrade")
 
 		upgrader.CheckOrigin = func(r *http.Request) bool { return true }
@@ -121,19 +120,13 @@ func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		defer c.Close()
 
-		// var id string
-
 		if r.URL.Query()["sid"] != nil {
-			log.Print("sid presented ! ")
-
 			return
-			// Still allows it ?
 		}
-		// log.Println("SID:", id)
 
 		socket := Socket{
 			Id:  s.randomUUID(),
-			Nps: "/",
+			Nsp: "/",
 			Conn: &Conn{
 				http:       c,
 				reqHeaders: r.Header.Clone(),
@@ -147,11 +140,7 @@ func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			pingTime: s.pingInterval,
 		}
 
-		defer func() {
-			log.Printf("socket %q closed", socket.Id)
-
-			socket.disconnect()
-		}()
+		defer socket.disconnect()
 
 		socket.dispose = append(socket.dispose, func() {
 			s.sockets.delete(socket.Id)
@@ -166,36 +155,29 @@ func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Upgrades:     []string{"websocket"},
 		}.ToJson())
 
-		log.Printf("headers %q: %+v", socket.Id, socket.Conn.reqHeaders)
-		log.Printf("query %q: %+v", socket.Id, socket.Conn.reqQuery)
-
 		for {
+
 			messageType, message, err := c.ReadMessage()
 			if err != nil {
-				log.Printf("got error: %v\n", err)
+				log.Printf("[socket.io] input error: %v\n", err)
+
 				break
 			}
 
 			if messageType == websocket.TextMessage {
 				err := s.handlerMessage(&socket, string(message))
 				if err != nil {
-					log.Printf("got error: %v\n", err)
+					log.Printf("[socket.io] message handling error: %v\n", err)
 
 					return
 				}
 			}
 		}
 	} else if strings.HasPrefix(r.URL.Path, s.path) {
-
-		log.Println("conection:path match")
-
 		clientDistFs, _ := fs.Sub(staticFS, "client-dist")
 		fs := http.StripPrefix(s.path, http.FileServer(http.FS(clientDistFs)))
 		fs.ServeHTTP(w, r)
 	} else {
-
-		log.Printf("conection:not found: got [%q] want [%q]", r.URL.Path, s.path)
-
 		http.NotFound(w, r)
 	}
 }
@@ -338,7 +320,7 @@ func (s *Io) new() func(ctx *fiber.Ctx) error {
 
 		socket := Socket{
 			Id:  s.randomUUID(),
-			Nps: "/",
+			Nsp: "/",
 			Conn: &Conn{
 				fasthttp: c,
 			},
@@ -380,9 +362,14 @@ func (s *Io) new() func(ctx *fiber.Ctx) error {
 }
 
 func (s *Io) handlerMessage(socket *Socket, message string) error {
+	log.Printf("[socket.io] recv packet sid=%s ns=%s  data=%s\n",
+		socket.Id, socket.Nsp, message)
+
 	enginePacketType := string(message[0:1])
 	switch enginePacketType {
 	case engineio.MESSAGE.String():
+		// log.Println("[socket.io] string message")
+
 		mess := string(message)
 		packetType := string(message[1:2])
 		rawpayload := string(message[2:])
@@ -436,6 +423,8 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 
 		switch packetType {
 		case socket_protocol.DISCONNECT.String():
+			// log.Println("[socket.io] disconnect message")
+
 			socket_nps, err := s.Of(namespace).sockets.get(socket.Id)
 			if err != nil {
 				return err
@@ -450,11 +439,13 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 				})
 			}
 		case socket_protocol.CONNECT.String():
+			// log.Println("[socket.io] connect message")
+
 			socket_nps := socket
 			if namespace != "/" {
 				socketWithNamespace := Socket{
 					Id:   socket.Id,
-					Nps:  namespace,
+					Nsp:  namespace,
 					Conn: socket.Conn,
 					listeners: listeners{
 						list: make(map[string][]eventCallback),
@@ -473,6 +464,8 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 			}
 
 			if s.onAuthentication != nil {
+				// log.Printf("[socket.io] connect with auth")
+
 				dataJson := map[string]string{}
 				json.Unmarshal([]byte(rawpayload), &dataJson)
 				if !s.onAuthentication(dataJson) {
@@ -515,6 +508,7 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 			for _, callback := range s.Of(namespace).onConnection.get("connection") {
 				callback(socket_nps)
 			}
+
 		case socket_protocol.EVENT.String():
 			socket_nps, err := s.Of(namespace).sockets.get(socket.Id)
 			if err != nil {
@@ -543,7 +537,9 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 			// case socket_protocol.BINARY_ACK.String():
 		}
 	case engineio.PONG.String():
-		// println("Client pong")
+		// println("[socket.io] client pong")
+	default:
+		log.Println("[socket.io] un-handled message")
 	}
 	return nil
 }
