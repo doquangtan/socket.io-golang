@@ -396,13 +396,16 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 		special3 := -1
 		nextMess := message
 
+		tot := 0
+
 		for {
 			nextSpecial3 := strings.Index(string(nextMess), ",")
-			if nextSpecial3 == -1 || (special1 != -1 && nextSpecial3 > special1) || (special2 != -1 && nextSpecial3 > special2) {
+			if nextSpecial3 == -1 || (special1 != -1 && (tot+nextSpecial3) > special1) || (special2 != -1 && (tot+nextSpecial3) > special2) {
 				break
 			}
 			nextMess = nextMess[nextSpecial3+1:]
 			special3 = nextSpecial3
+			tot += nextSpecial3
 		}
 
 		if special3 != -1 {
