@@ -3,7 +3,6 @@ package socketio
 import (
 	"errors"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"sync"
@@ -17,13 +16,11 @@ import (
 )
 
 type Conn struct {
-	fasthttp *websocket.Conn
-	http     *gWebsocket.Conn
-
+	fasthttp   *websocket.Conn
+	http       *gWebsocket.Conn
 	reqHeaders http.Header
 	reqQuery   url.Values
-
-	data *atomic.Pointer[any]
+	data       *atomic.Pointer[any]
 }
 
 func (c *Conn) RequestHeaders() http.Header { return c.reqHeaders }
@@ -136,8 +133,6 @@ func (s *Socket) Rooms() []string {
 }
 
 func (s *Socket) disconnect() {
-	log.Printf("[socket.io] closing socket %q", s.Id)
-
 	s.Conn.close()
 	s.Conn = nil
 	// s.rooms = []string{}

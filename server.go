@@ -48,8 +48,7 @@ type Io struct {
 	onAuthentication func(params map[string]string) bool
 	onConnection     connectionEvent
 	close            chan interface{}
-
-	path string
+	path             string
 }
 
 type (
@@ -105,12 +104,8 @@ func New(fns ...optionFn) *Io {
 var upgrader = gWebsocket.Upgrader{}
 
 func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[+] HTTP header: %+v", r.Header)
-	log.Printf("[+] HTTP query: %+v", r.URL.Query())
-
 	header := r.Header
 	if slices.Contains(header["Connection"], "Upgrade") && header.Get("Upgrade") == "websocket" {
-		log.Println("conection:upgrade")
 
 		upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 		c, err := upgrader.Upgrade(w, r, nil)
@@ -368,7 +363,6 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 	enginePacketType := string(message[0:1])
 	switch enginePacketType {
 	case engineio.MESSAGE.String():
-		// log.Println("[socket.io] string message")
 
 		mess := string(message)
 		packetType := string(message[1:2])
@@ -423,8 +417,6 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 
 		switch packetType {
 		case socket_protocol.DISCONNECT.String():
-			// log.Println("[socket.io] disconnect message")
-
 			socket_nps, err := s.Of(namespace).sockets.get(socket.Id)
 			if err != nil {
 				return err
@@ -439,8 +431,6 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 				})
 			}
 		case socket_protocol.CONNECT.String():
-			// log.Println("[socket.io] connect message")
-
 			socket_nps := socket
 			if namespace != "/" {
 				socketWithNamespace := Socket{
@@ -464,8 +454,6 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 			}
 
 			if s.onAuthentication != nil {
-				// log.Printf("[socket.io] connect with auth")
-
 				dataJson := map[string]string{}
 				json.Unmarshal([]byte(rawpayload), &dataJson)
 				if !s.onAuthentication(dataJson) {
@@ -537,9 +525,11 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 			// case socket_protocol.BINARY_ACK.String():
 		}
 	case engineio.PONG.String():
-		// println("[socket.io] client pong")
+		// log.Println("[socket.io] received pong")
+
 	default:
-		log.Println("[socket.io] un-handled message")
+		log.Printf("[socket.io] un-handled packet type: %q\n", enginePacketType)
 	}
+
 	return nil
 }
