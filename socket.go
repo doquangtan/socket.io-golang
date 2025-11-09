@@ -3,7 +3,10 @@ package socketio
 import (
 	"errors"
 	"io"
+	"net/http"
+	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/doquangtan/socketio/v4/engineio"
@@ -13,9 +16,28 @@ import (
 )
 
 type Conn struct {
-	fasthttp *websocket.Conn
-	http     *gWebsocket.Conn
+	fasthttp   *websocket.Conn
+	http       *gWebsocket.Conn
+	reqHeaders http.Header
+	reqQuery   url.Values
+	data       *atomic.Pointer[any]
 }
+
+func (c *Conn) RequestHeaders() http.Header { return c.reqHeaders }
+func (c *Conn) RequestQuery() url.Values    { return c.reqQuery }
+
+func cloneValues(v url.Values) url.Values {
+	out := make(url.Values, len(v))
+	for k, vals := range v {
+		cp := make([]string, len(vals))
+		copy(cp, vals)
+		out[k] = cp
+	}
+	return out
+}
+
+func (c *Conn) SetData(data any) { c.data.Store(&data) }
+func (c *Conn) GetData() any     { return c.data.Load() }
 
 func (c *Conn) nextWriter(messageType int) (io.WriteCloser, error) {
 	if c.http != nil {
@@ -49,8 +71,9 @@ func (c *Conn) close() error {
 
 type Socket struct {
 	sync.RWMutex
+
 	Id        string
-	Nps       string
+	Nsp       string
 	Conn      *Conn
 	rooms     roomNames
 	listeners listeners
@@ -139,9 +162,10 @@ func (s *Socket) writer(t socket_protocol.PacketType, arg ...interface{}) error 
 		return err
 	}
 	nps := ""
-	if s.Nps != "/" {
-		nps = s.Nps + ","
+	if s.Nsp != "/" {
+		nps = s.Nsp + ","
 	}
+
 	if t == socket_protocol.ACK {
 		agrs := append([]interface{}{}, arg[0].([]interface{})[1:])
 		socket_protocol.WriteToWithAck(w, t, nps, arg[0].([]interface{})[0].(string), agrs...)

@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/doquangtan/socketio/v4/client"
@@ -47,9 +48,29 @@ type Io struct {
 	onAuthentication func(params map[string]string) bool
 	onConnection     connectionEvent
 	close            chan interface{}
+	path             string
 }
 
-func New() *Io {
+type (
+	option struct {
+		path string
+	}
+	optionFn func(*option)
+)
+
+func SetPath(path string) optionFn { return func(opt *option) { opt.path = path } }
+
+func New(fns ...optionFn) *Io {
+	// Load sensible default value.
+	opt := option{
+		path: "/socket.io/",
+	}
+
+	// Overload them with user's provided ones.
+	for _, fn := range fns {
+		fn(&opt)
+	}
+
 	pingInterval := time.Duration(25000 * time.Millisecond)
 	pingTimeout := time.Duration(25000 * time.Millisecond)
 	maxPayload := 1000000
@@ -68,6 +89,7 @@ func New() *Io {
 		pingInterval: pingInterval,
 		pingTimeout:  pingTimeout,
 		maxPayload:   maxPayload,
+		path:         opt.path,
 	}
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	go io.read(ctx)
@@ -84,9 +106,9 @@ var upgrader = gWebsocket.Upgrader{}
 func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	header := r.Header
 	if slices.Contains(header["Connection"], "Upgrade") && header.Get("Upgrade") == "websocket" {
+
 		upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 		c, err := upgrader.Upgrade(w, r, nil)
-
 		if err != nil {
 			log.Print("Upgrade:", err)
 			return
@@ -99,16 +121,22 @@ func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		socket := Socket{
 			Id:  s.randomUUID(),
-			Nps: "/",
+			Nsp: "/",
 			Conn: &Conn{
-				http: c,
+				http:       c,
+				reqHeaders: r.Header.Clone(),
+				reqQuery:   cloneValues(r.URL.Query()),
+				data:       &atomic.Pointer[any]{},
 			},
+
 			listeners: listeners{
 				list: make(map[string][]eventCallback),
 			},
 			pingTime: s.pingInterval,
 		}
+
 		defer socket.disconnect()
+
 		socket.dispose = append(socket.dispose, func() {
 			s.sockets.delete(socket.Id)
 		})
@@ -123,21 +151,26 @@ func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}.ToJson())
 
 		for {
+
 			messageType, message, err := c.ReadMessage()
 			if err != nil {
+				log.Printf("[socket.io] input error: %v\n", err)
+
 				break
 			}
 
 			if messageType == websocket.TextMessage {
 				err := s.handlerMessage(&socket, string(message))
 				if err != nil {
+					log.Printf("[socket.io] message handling error: %v\n", err)
+
 					return
 				}
 			}
 		}
-	} else if strings.HasPrefix(r.URL.Path, "/socket.io/") {
+	} else if strings.HasPrefix(r.URL.Path, s.path) {
 		clientDistFs, _ := fs.Sub(staticFS, "client-dist")
-		fs := http.StripPrefix("/socket.io/", http.FileServer(http.FS(clientDistFs)))
+		fs := http.StripPrefix(s.path, http.FileServer(http.FS(clientDistFs)))
 		fs.ServeHTTP(w, r)
 	} else {
 		http.NotFound(w, r)
@@ -282,7 +315,7 @@ func (s *Io) new() func(ctx *fiber.Ctx) error {
 
 		socket := Socket{
 			Id:  s.randomUUID(),
-			Nps: "/",
+			Nsp: "/",
 			Conn: &Conn{
 				fasthttp: c,
 			},
@@ -324,9 +357,13 @@ func (s *Io) new() func(ctx *fiber.Ctx) error {
 }
 
 func (s *Io) handlerMessage(socket *Socket, message string) error {
+	log.Printf("[socket.io] recv packet sid=%s ns=%s  data=%s\n",
+		socket.Id, socket.Nsp, message)
+
 	enginePacketType := string(message[0:1])
 	switch enginePacketType {
 	case engineio.MESSAGE.String():
+
 		mess := string(message)
 		packetType := string(message[1:2])
 		rawpayload := string(message[2:])
@@ -340,13 +377,16 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 		special3 := -1
 		nextMess := message
 
+		tot := 0
+
 		for {
 			nextSpecial3 := strings.Index(string(nextMess), ",")
-			if nextSpecial3 == -1 || (special1 != -1 && nextSpecial3 > special1) || (special2 != -1 && nextSpecial3 > special2) {
+			if nextSpecial3 == -1 || (special1 != -1 && (tot+nextSpecial3) > special1) || (special2 != -1 && (tot+nextSpecial3) > special2) {
 				break
 			}
 			nextMess = nextMess[nextSpecial3+1:]
 			special3 = nextSpecial3
+			tot += nextSpecial3
 		}
 
 		if special3 != -1 {
@@ -395,7 +435,7 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 			if namespace != "/" {
 				socketWithNamespace := Socket{
 					Id:   socket.Id,
-					Nps:  namespace,
+					Nsp:  namespace,
 					Conn: socket.Conn,
 					listeners: listeners{
 						list: make(map[string][]eventCallback),
@@ -456,6 +496,7 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 			for _, callback := range s.Of(namespace).onConnection.get("connection") {
 				callback(socket_nps)
 			}
+
 		case socket_protocol.EVENT.String():
 			socket_nps, err := s.Of(namespace).sockets.get(socket.Id)
 			if err != nil {
@@ -484,7 +525,11 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 			// case socket_protocol.BINARY_ACK.String():
 		}
 	case engineio.PONG.String():
-		// println("Client pong")
+		// log.Println("[socket.io] received pong")
+
+	default:
+		log.Printf("[socket.io] un-handled packet type: %q\n", enginePacketType)
 	}
+
 	return nil
 }
