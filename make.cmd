@@ -8,7 +8,7 @@ IF %func%==public (
 
     git pull
 
-    git tag -a %version% -m "v4.1.6: - Fixed concurrent write not Lock Mutex when Ping to client."
+    git tag -a %version% -m "v4.1.7\r\n- Added polling protocol\r\n- Added methods server.use\r\n- Added attribute socket.handshake"
 
     git push origin %version%
 
@@ -19,4 +19,4 @@ IF %func%==public (
     echo Done %func%
 )
 
-@REM make public v4.1.6
+@REM make public v4.1.7
