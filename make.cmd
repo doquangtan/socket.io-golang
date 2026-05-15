@@ -8,7 +8,7 @@ IF %func%==public (
 
     git pull
 
-    git tag -a %version% -m "v4.1.7\r\n- Added polling protocol\r\n- Added methods server.use\r\n- Added attribute socket.handshake"
+    git tag -a %version% -m "v4.1.8\r\n- Fixed message paser\r\n- Fixed not call dispose namespace when disconnected"
 
     git push origin %version%
 
@@ -19,4 +19,4 @@ IF %func%==public (
     echo Done %func%
 )
 
-@REM make public v4.1.7
+@REM make public v4.1.8

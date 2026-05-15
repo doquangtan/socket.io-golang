@@ -23,19 +23,9 @@ func socketIoHandle(io *socketio.Io) {
 		return true
 	})
 
-	io.Use(func(socket *socketio.Socket, next func() *socketio.UseError) *socketio.UseError {
-		if socket.Handshake.Headers.Get("Abcd") != "xyzz" {
-			return &socketio.UseError{
-				Message: "Loi",
-				Data: map[string]interface{}{
-					"content": "Please retry later",
-				},
-			}
-		}
-		return next()
-	})
+	adminNps := io.Of("/admin")
 
-	io.OnConnection(func(socket *socketio.Socket) {
+	adminNps.OnConnection(func(socket *socketio.Socket) {
 		log.Printf("[%s] Người dùng mới kết nối: %s",
 			time.Now().Format("15:04:05"), socket.Id)
 
@@ -52,7 +42,7 @@ func socketIoHandle(io *socketio.Io) {
 			users.set(socket.Id, username)
 			log.Printf("%s đã tham gia phòng chat", username)
 
-			io.Emit("user-joined", map[string]interface{}{
+			adminNps.Emit("user-joined", map[string]interface{}{
 				"message":   fmt.Sprintf("%s đã tham gia phòng chat", username),
 				"users":     users.list(),
 				"userCount": users.count(),
@@ -74,7 +64,7 @@ func socketIoHandle(io *socketio.Io) {
 
 			log.Printf("[%s] %s: %s", ts, username, text)
 
-			io.Emit("receive-message", map[string]interface{}{
+			adminNps.Emit("receive-message", map[string]interface{}{
 				"username":  username,
 				"text":      text,
 				"timestamp": ts,
@@ -99,9 +89,9 @@ func socketIoHandle(io *socketio.Io) {
 		socket.On("disconnect", func(event *socketio.EventPayload) {
 			username := users.get(socket.Id)
 			users.delete(socket.Id)
-			log.Printf("%s đã ngắt kết nối", username)
+			log.Printf("Disconnect %s đã ngắt kết nối", username)
 
-			io.Emit("user-left", map[string]interface{}{
+			adminNps.Emit("user-left", map[string]interface{}{
 				"message":   fmt.Sprintf("%s đã rời khỏi phòng chat", username),
 				"users":     users.list(),
 				"userCount": users.count(),
@@ -179,13 +169,13 @@ func httpServer() {
 }
 
 func main() {
-	httpServer()
+	// httpServer()
 	// httpServerWithCors()
 	// usingWithGin()
 
 	// socketClientTest()
 
-	// usingWithGoFiber()
+	usingWithGoFiber()
 
 }
 
