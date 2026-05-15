@@ -3,7 +3,7 @@
 # golang socket.io
 
 - [socket.io](https://pkg.go.dev/github.com/doquangtan/socketio/v4) is library an implementation of [Socket.IO](http://socket.io) in Golang, which is a realtime application framework.
-- This library support socket.io-client version 3, 4 and only support websocket transport
+- This library support socket.io-client version 3, 4 and support polling or websocket transport
 
 # Contents
 
@@ -166,6 +166,32 @@ io.To("room-101").Emit("hello", "world")
 sockets := io.Sockets()
 ```
 
+#### server.use(fn)
+
+```go
+io.Use(func(socket *socketio.Socket, next func() *socketio.UseError) *socketio.UseError {
+	if socket.Handshake.Headers.Get("Abcd") != "xyzz" {
+		return &socketio.UseError{
+			Message: "Some thing wrong...",
+			Data: map[string]interface{}{
+				"content": "Please retry later",
+			},
+		}
+	}
+	return next()
+})
+```
+
+Client: ([javascript server.use(fn) document](https://socket.io/docs/v4/server-api/#serverusefn))
+
+```javascript
+socket.on("connect_error", err => {
+  console.log(err instanceof Error); // true
+  console.log(err.message); // Some thing wrong...
+  console.log(err.data); // { content: "Please retry later" }
+});
+```
+
 ## Namespace
 
 ### Events
@@ -230,6 +256,24 @@ io.OnConnection(func(socket *socketio.Socket) {
 		// ...
 	})
 })
+```
+
+### Attributes
+
+#### socket.handshake
+
+Attributes are based on the original library, referencing the ([documentation](https://socket.io/docs/v4/server-api/#sockethandshake)).
+
+```go
+io.Use(func(socket *socketio.Socket, next func() *socketio.UseError) *socketio.UseError {
+	handshake := socket.Handshake
+	//...
+})
+
+io.OnConnection(func(socket *socketio.Socket) {
+  handshake := socket.Handshake
+  // ...
+});
 ```
 
 ### Methods

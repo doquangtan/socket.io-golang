@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
+	"time"
 
 	"github.com/doquangtan/socketio/v4"
 	"github.com/gin-contrib/static"
@@ -13,6 +13,8 @@ import (
 )
 
 func socketIoHandle(io *socketio.Io) {
+	users := &userStore{data: make(map[string]string)}
+
 	io.OnAuthentication(func(params map[string]string) bool {
 		token, ok := params["token"]
 		if !ok || token != "123" {
@@ -21,92 +23,89 @@ func socketIoHandle(io *socketio.Io) {
 		return true
 	})
 
-	io.OnConnection(func(socket *socketio.Socket) {
-		println("connect", socket.Nps, socket.Id)
-		socket.Join("demo")
-		io.To("demo").Emit("test", socket.Id+" join us room...", "server message")
-
-		socket.On("connected", func(event *socketio.EventPayload) {
-			for i := 0; i < 100; i++ {
-				go func() {
-					socket.Emit("chat message", "Main concurrent 1_"+strconv.Itoa(i))
-				}()
-				go func() {
-					socket.Emit("chat message", "Main concurrent 2_"+strconv.Itoa(i))
-				}()
-				go func() {
-					socket.Emit("chat message", "Main concurrent 3_"+strconv.Itoa(i))
-				}()
-				go func() {
-					socket.Emit("chat message", "Main concurrent 4_"+strconv.Itoa(i))
-				}()
-				go func() {
-					socket.Emit("chat message", "Main concurrent 5_"+strconv.Itoa(i))
-				}()
+	io.Use(func(socket *socketio.Socket, next func() *socketio.UseError) *socketio.UseError {
+		if socket.Handshake.Headers.Get("Abcd") != "xyzz" {
+			return &socketio.UseError{
+				Message: "Loi",
+				Data: map[string]interface{}{
+					"content": "Please retry later",
+				},
 			}
-		})
-		socket.On("test", func(event *socketio.EventPayload) {
-			log.Println("Test: ", event.Data)
-			socket.Emit("test", event.Data...)
-		})
-
-		socket.On("join-room", func(event *socketio.EventPayload) {
-			if len(event.Data) > 0 && event.Data[0] != nil {
-				socket.Join(event.Data[0].(string))
-			}
-		})
-
-		socket.On("to-room", func(event *socketio.EventPayload) {
-			socket.To("demo").To("demo2").Emit("test", "hello")
-		})
-
-		socket.On("leave-room", func(event *socketio.EventPayload) {
-			socket.Leave("demo")
-			socket.Join("demo2")
-		})
-
-		socket.On("my-room", func(event *socketio.EventPayload) {
-			socket.Emit("my-room", socket.Rooms())
-		})
-
-		socket.On("chat message", func(event *socketio.EventPayload) {
-			socket.Emit("chat message", event.Data[0])
-
-			if len(event.Data) > 2 {
-				log.Println(socket.Nps, ": ", event.Data[2].(map[string]interface{}))
-			}
-
-			if event.Ack != nil {
-				event.Ack("hello from name space root", map[string]interface{}{
-					"Test": "ok",
-				})
-			}
-		})
-
-		socket.On("disconnecting", func(event *socketio.EventPayload) {
-			println("disconnecting", socket.Nps, socket.Id)
-		})
-
-		socket.On("disconnect", func(event *socketio.EventPayload) {
-			println("disconnect", socket.Nps, socket.Id)
-		})
+		}
+		return next()
 	})
 
-	io.Of("/hello").OnConnection(func(socket *socketio.Socket) {
-		println("connect", socket.Nps, socket.Id)
+	io.OnConnection(func(socket *socketio.Socket) {
+		log.Printf("[%s] Người dùng mới kết nối: %s",
+			time.Now().Format("15:04:05"), socket.Id)
 
-		socket.On("chat message", func(event *socketio.EventPayload) {
-			socket.Emit("chat message", event.Data[0])
-
-			if len(event.Data) > 2 {
-				log.Println(socket.Nps, ": ", event.Data[2].(map[string]interface{}))
+		// Sự kiện khi người dùng tham gia chat
+		socket.On("join", func(event *socketio.EventPayload) {
+			if len(event.Data) == 0 || event.Data[0] == nil {
+				return
+			}
+			username, ok := event.Data[0].(string)
+			if !ok {
+				return
 			}
 
-			if event.Ack != nil {
-				event.Ack("hello from nps test", map[string]interface{}{
-					"Test": "ok",
-				})
+			users.set(socket.Id, username)
+			log.Printf("%s đã tham gia phòng chat", username)
+
+			io.Emit("user-joined", map[string]interface{}{
+				"message":   fmt.Sprintf("%s đã tham gia phòng chat", username),
+				"users":     users.list(),
+				"userCount": users.count(),
+			})
+		})
+
+		// Sự kiện nhận tin nhắn
+		socket.On("send-message", func(event *socketio.EventPayload) {
+			if len(event.Data) == 0 || event.Data[0] == nil {
+				return
 			}
+			payload, ok := event.Data[0].(map[string]interface{})
+			if !ok {
+				return
+			}
+			text, _ := payload["text"].(string)
+			username := users.get(socket.Id)
+			ts := time.Now().Format("15:04:05")
+
+			log.Printf("[%s] %s: %s", ts, username, text)
+
+			io.Emit("receive-message", map[string]interface{}{
+				"username":  username,
+				"text":      text,
+				"timestamp": ts,
+			})
+		})
+
+		// Sự kiện đang gõ
+		socket.On("typing", func(event *socketio.EventPayload) {
+			socket.Broadcast().Emit("user-typing", map[string]interface{}{
+				"username": users.get(socket.Id),
+			})
+		})
+
+		// Sự kiện ngừng gõ
+		socket.On("stop-typing", func(event *socketio.EventPayload) {
+			socket.Broadcast().Emit("user-stopped-typing", map[string]interface{}{
+				"username": users.get(socket.Id),
+			})
+		})
+
+		// Sự kiện ngắt kết nối
+		socket.On("disconnect", func(event *socketio.EventPayload) {
+			username := users.get(socket.Id)
+			users.delete(socket.Id)
+			log.Printf("%s đã ngắt kết nối", username)
+
+			io.Emit("user-left", map[string]interface{}{
+				"message":   fmt.Sprintf("%s đã rời khỏi phòng chat", username),
+				"users":     users.list(),
+				"userCount": users.count(),
+			})
 		})
 	})
 }
@@ -119,7 +118,8 @@ func usingWithGoFiber() {
 	app.Static("/", "./public")
 	app.Use("/", io.FiberMiddleware)
 	app.Route("/socket.io", io.FiberRoute)
-	app.Listen(":3300")
+	err := app.Listen(":3300")
+	log.Fatal(err)
 }
 
 func usingWithGin() {
@@ -128,7 +128,7 @@ func usingWithGin() {
 
 	router := gin.Default()
 	router.Use(static.Serve("/", static.LocalFile("./public", false)))
-	router.GET("/socket.io/*any", gin.WrapH(io.HttpHandler()))
+	router.Any("/socket.io/*any", gin.WrapH(io.HttpHandler()))
 	router.Run(":3300")
 }
 
@@ -179,8 +179,8 @@ func httpServer() {
 }
 
 func main() {
-	// httpServer()
-	httpServerWithCors()
+	httpServer()
+	// httpServerWithCors()
 	// usingWithGin()
 
 	// socketClientTest()

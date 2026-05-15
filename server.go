@@ -4,8 +4,9 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io/fs"
-	"log"
 	"net/http"
 	"reflect"
 	"slices"
@@ -14,8 +15,9 @@ import (
 
 	"github.com/doquangtan/socketio/v4/client"
 	"github.com/doquangtan/socketio/v4/engineio"
-	"github.com/doquangtan/socketio/v4/socket_protocol"
+	"github.com/doquangtan/socketio/v4/protocol"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/adaptor"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/gofiber/websocket/v2"
 	"github.com/google/uuid"
@@ -37,6 +39,15 @@ type payload struct {
 	ackId  string
 }
 
+type UseError struct {
+	Message string
+	Data    map[string]interface{}
+}
+
+func (e UseError) Error() string {
+	return e.Message
+}
+
 type Io struct {
 	pingInterval     time.Duration
 	pingTimeout      time.Duration
@@ -46,6 +57,7 @@ type Io struct {
 	readChan         chan payload
 	onAuthentication func(params map[string]string) bool
 	onConnection     connectionEvent
+	use              func(socket *Socket, next func() *UseError) *UseError
 	close            chan interface{}
 }
 
@@ -83,44 +95,56 @@ var upgrader = gWebsocket.Upgrader{}
 
 func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	header := r.Header
-	if slices.Contains(header["Connection"], "Upgrade") && header.Get("Upgrade") == "websocket" {
+	query := r.URL.Query()
+	transport := query.Get("transport")
+	sid := query.Get("sid")
+	if transport == "websocket" &&
+		slices.Contains(header["Connection"], "Upgrade") &&
+		header.Get("Upgrade") == "websocket" {
 		upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 		c, err := upgrader.Upgrade(w, r, nil)
 
 		if err != nil {
-			log.Print("Upgrade:", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		defer c.Close()
 
-		if r.URL.Query()["sid"] != nil {
-			return
-		}
+		var socket *Socket
+		if sid != "" {
+			socket, err = s.sockets.get(sid)
+			if err != nil {
+				http.Error(w, "unknown session", http.StatusBadRequest)
+				return
+			}
+			socket.Conn.http = c
+			defer socket.disconnect()
+		} else {
+			socket = &Socket{
+				Id:  s.randomUUID(),
+				Nps: "/",
+				Conn: &Conn{
+					http: c,
+				},
+				listeners: listeners{
+					list: make(map[string][]eventCallback),
+				},
+				pingTime: s.pingInterval,
+			}
+			defer socket.disconnect()
+			socket.dispose = append(socket.dispose, func() {
+				s.sockets.delete(socket.Id)
+			})
+			s.sockets.set(socket)
 
-		socket := Socket{
-			Id:  s.randomUUID(),
-			Nps: "/",
-			Conn: &Conn{
-				http: c,
-			},
-			listeners: listeners{
-				list: make(map[string][]eventCallback),
-			},
-			pingTime: s.pingInterval,
+			socket.engineWrite(engineio.OPEN, engineio.ConnParameters{
+				SID:          socket.Id,
+				PingInterval: s.pingInterval,
+				PingTimeout:  s.pingTimeout,
+				MaxPayload:   s.maxPayload,
+				Upgrades:     []string{},
+			}.ToJson())
 		}
-		defer socket.disconnect()
-		socket.dispose = append(socket.dispose, func() {
-			s.sockets.delete(socket.Id)
-		})
-		s.sockets.set(&socket)
-
-		socket.engineWrite(engineio.OPEN, engineio.ConnParameters{
-			SID:          socket.Id,
-			PingInterval: s.pingInterval,
-			PingTimeout:  s.pingTimeout,
-			MaxPayload:   s.maxPayload,
-			Upgrades:     []string{"websocket"},
-		}.ToJson())
 
 		for {
 			messageType, message, err := c.ReadMessage()
@@ -129,13 +153,31 @@ func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if messageType == websocket.TextMessage {
-				err := s.handlerMessage(&socket, string(message))
+				err := s.handlerMessage(socket, string(message))
 				if err != nil {
 					return
 				}
 			}
 		}
 	} else if strings.HasPrefix(r.URL.Path, "/socket.io/") {
+		fileName := strings.Replace(r.URL.Path, "/socket.io/", "", 1)
+		if fileName == "" {
+			if transport == "polling" {
+				switch r.Method {
+				case http.MethodGet:
+					if sid == "" {
+						s.handleHandshake(w, r)
+						return
+					}
+					s.handlePoll(w, r)
+				case http.MethodPost:
+					s.handlePost(w, r)
+				default:
+					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				}
+			}
+			return
+		}
 		clientDistFs, _ := fs.Sub(staticFS, "client-dist")
 		fs := http.StripPrefix("/socket.io/", http.FileServer(http.FS(clientDistFs)))
 		fs.ServeHTTP(w, r)
@@ -156,11 +198,15 @@ func (s *Io) FiberRoute(router fiber.Router) {
 			return c.Next()
 		} else if strings.HasPrefix(c.Path(), "/socket.io/") {
 			fileName := strings.Replace(c.Path(), "/socket.io/", "", 1)
+			if fileName == "" {
+				return c.Next()
+			}
 			return filesystem.SendFile(c, http.FS(clientDistFs), fileName)
 		}
 		return fiber.ErrUpgradeRequired
 	})
 	router.Get("/", s.new())
+	router.Post("/", s.fiberHandlerPost())
 }
 
 func (s *Io) FiberMiddleware(c *fiber.Ctx) error {
@@ -192,6 +238,10 @@ func (s *Io) OnConnection(fn connectionEventCallback) {
 
 func (s *Io) OnAuthentication(fn func(params map[string]string) bool) {
 	s.onAuthentication = fn
+}
+
+func (s *Io) Use(fn func(socket *Socket, next func() *UseError) *UseError) {
+	s.use = fn
 }
 
 func (s *Io) Emit(event string, agrs ...interface{}) error {
@@ -275,35 +325,64 @@ func (s *Io) randomUUID() string {
 }
 
 func (s *Io) new() func(ctx *fiber.Ctx) error {
+	return func(ctx *fiber.Ctx) error {
+		if ctx.Query("transport") == "websocket" {
+			return s.handleWebsocket(ctx)
+		} else if ctx.Query("transport") == "polling" {
+			if ctx.Query("sid") == "" {
+				return adaptor.HTTPHandlerFunc(s.handleHandshake)(ctx)
+			}
+			return adaptor.HTTPHandlerFunc(s.handlePoll)(ctx)
+		} else {
+			return ctx.SendStatus(404)
+		}
+	}
+}
+
+func (s *Io) fiberHandlerPost() func(ctx *fiber.Ctx) error {
+	return func(ctx *fiber.Ctx) error {
+		return adaptor.HTTPHandlerFunc(s.handlePost)(ctx)
+	}
+}
+
+func (s *Io) handleWebsocket(ctx *fiber.Ctx) error {
 	return websocket.New(func(c *websocket.Conn) {
+		var socket *Socket
+		var err error
 		if c.Query("sid") != "" {
-			return
-		}
+			socket, err = s.sockets.get(c.Query("sid"))
+			if err != nil {
+				ctx.Status(http.StatusBadRequest).SendString("unknown session")
+				return
+			}
+			socket.Conn.fasthttp = c
+			defer socket.disconnect()
+		} else {
+			socket = &Socket{
+				Id:  s.randomUUID(),
+				Nps: "/",
+				Conn: &Conn{
+					fasthttp: c,
+				},
+				listeners: listeners{
+					list: make(map[string][]eventCallback),
+				},
+				pingTime: s.pingInterval,
+			}
+			defer socket.disconnect()
+			socket.dispose = append(socket.dispose, func() {
+				s.sockets.delete(socket.Id)
+			})
+			s.sockets.set(socket)
 
-		socket := Socket{
-			Id:  s.randomUUID(),
-			Nps: "/",
-			Conn: &Conn{
-				fasthttp: c,
-			},
-			listeners: listeners{
-				list: make(map[string][]eventCallback),
-			},
-			pingTime: s.pingInterval,
+			socket.engineWrite(engineio.OPEN, engineio.ConnParameters{
+				SID:          socket.Id,
+				PingInterval: s.pingInterval,
+				PingTimeout:  s.pingTimeout,
+				MaxPayload:   s.maxPayload,
+				Upgrades:     []string{},
+			}.ToJson())
 		}
-		defer socket.disconnect()
-		socket.dispose = append(socket.dispose, func() {
-			s.sockets.delete(socket.Id)
-		})
-		s.sockets.set(&socket)
-
-		socket.engineWrite(engineio.OPEN, engineio.ConnParameters{
-			SID:          socket.Id,
-			PingInterval: s.pingInterval,
-			PingTimeout:  s.pingTimeout,
-			MaxPayload:   s.maxPayload,
-			Upgrades:     []string{"websocket"},
-		}.ToJson())
 
 		for {
 			messageType, message, err := c.ReadMessage()
@@ -314,17 +393,149 @@ func (s *Io) new() func(ctx *fiber.Ctx) error {
 			}
 
 			if messageType == websocket.TextMessage {
-				err := s.handlerMessage(&socket, string(message))
+				err := s.handlerMessage(socket, string(message))
 				if err != nil {
 					return
 				}
 			}
 		}
+	})(ctx)
+}
+
+func (s *Io) handleHandshake(w http.ResponseWriter, r *http.Request) {
+	socket := &Socket{
+		Id:  s.randomUUID(),
+		Nps: "/",
+		Conn: &Conn{
+			polling: &protocol.Polling{
+				Ready: make(chan struct{}),
+			},
+		},
+		listeners: listeners{
+			list: make(map[string][]eventCallback),
+		},
+		pingTime: s.pingInterval,
+		Handshake: engineio.Handshake{
+			Headers: r.Header,
+			URL:     r.RequestURI,
+		},
+	}
+	socket.dispose = append(socket.dispose, func() {
+		s.sockets.delete(socket.Id)
 	})
+	s.sockets.set(socket)
+
+	socket.engineWrite(engineio.OPEN, engineio.ConnParameters{
+		SID:          socket.Id,
+		PingInterval: s.pingInterval,
+		PingTimeout:  s.pingTimeout,
+		MaxPayload:   s.maxPayload,
+		Upgrades:     []string{"websocket"},
+	}.ToJson())
+	socket.Conn.polling.Flush(w)
+}
+
+func (s *Io) handlePost(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if q.Get("EIO") != "4" {
+		http.Error(w, "unsupported EIO version", http.StatusBadRequest)
+		return
+	}
+	if q.Get("transport") != "polling" {
+		http.Error(w, "unsupported transport", http.StatusBadRequest)
+		return
+	}
+
+	sid := q.Get("sid")
+	if sid == "" {
+		w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
+		fmt.Fprint(w, "ok")
+		return
+	}
+
+	socket, err := s.sockets.get(sid)
+	if err != nil {
+		w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
+		fmt.Fprint(w, "ok")
+		return
+	}
+
+	body := make([]byte, r.ContentLength)
+	r.Body.Read(body)
+	r.Body.Close()
+
+	Separator := "\x1e"
+	payload := string(body)
+	packets := strings.Split(payload, Separator)
+
+	for _, pkt := range packets {
+		if len(pkt) == 0 {
+			continue
+		}
+		err := s.handlerMessage(socket, pkt)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
+	fmt.Fprint(w, "ok")
+}
+
+func (s *Io) handlePoll(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if q.Get("EIO") != "4" {
+		http.Error(w, "unsupported EIO version", http.StatusBadRequest)
+		return
+	}
+	if q.Get("transport") != "polling" {
+		http.Error(w, "unsupported transport", http.StatusBadRequest)
+		return
+	}
+
+	sid := q.Get("sid")
+	if sid == "" {
+		w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
+		fmt.Fprint(w, engineio.NOOP.String())
+		return
+	}
+
+	socket, err := s.sockets.get(sid)
+	if err != nil {
+		w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
+		fmt.Fprint(w, engineio.NOOP.String())
+		return
+	}
+
+	// Flush ngay nếu đã có data
+	err = socket.Conn.polling.Flush(w)
+	if err == nil {
+		return
+	}
+
+	// Không có data → chờ (long-poll)
+	timeout := time.NewTimer(s.pingInterval)
+	defer timeout.Stop()
+
+	select {
+	case <-socket.Conn.polling.Ready:
+		if socket.Conn != nil {
+			socket.Conn.polling.Flush(w)
+		}
+	case <-timeout.C:
+		if socket.Conn != nil {
+			socket.engineWrite(engineio.NOOP)
+			socket.Conn.polling.Flush(w)
+		}
+	case <-r.Context().Done():
+		socket.disconnect()
+	}
 }
 
 func (s *Io) handlerMessage(socket *Socket, message string) error {
 	enginePacketType := string(message[0:1])
+	anyAfterPacketType := string(message[1:])
 	switch enginePacketType {
 	case engineio.MESSAGE.String():
 		mess := string(message)
@@ -376,7 +587,7 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 		}
 
 		switch packetType {
-		case socket_protocol.DISCONNECT.String():
+		case protocol.DISCONNECT.String():
 			socket_nps, err := s.Of(namespace).sockets.get(socket.Id)
 			if err != nil {
 				return err
@@ -390,7 +601,7 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 					Data:   []interface{}{},
 				})
 			}
-		case socket_protocol.CONNECT.String():
+		case protocol.CONNECT.String():
 			socket_nps := socket
 			if namespace != "/" {
 				socketWithNamespace := Socket{
@@ -405,8 +616,23 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 				socket_nps = &socketWithNamespace
 
 				if nps := s.namespaces.get(namespace); nps == nil {
-					socket_nps.writer(socket_protocol.CONNECT_ERROR, map[string]interface{}{
+					socket_nps.writer(protocol.CONNECT_ERROR, map[string]interface{}{
 						"message": "Invalid namespace",
+					})
+					// continue
+					return nil
+				}
+			}
+
+			if s.use != nil {
+				err := s.use(socket_nps, func() *UseError {
+					return nil
+				})
+				var useError *UseError
+				if errors.As(err, &useError) {
+					socket_nps.writer(protocol.CONNECT_ERROR, map[string]interface{}{
+						"message": useError.Message,
+						"data":    useError.Data,
 					})
 					// continue
 					return nil
@@ -417,7 +643,7 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 				dataJson := map[string]string{}
 				json.Unmarshal([]byte(rawpayload), &dataJson)
 				if !s.onAuthentication(dataJson) {
-					socket_nps.writer(socket_protocol.CONNECT_ERROR, map[string]interface{}{
+					socket_nps.writer(protocol.CONNECT_ERROR, map[string]interface{}{
 						"message": "Not authenticated",
 					})
 					// continue
@@ -425,7 +651,7 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 				}
 			}
 
-			socket.dispose = append(socket.dispose, func() {
+			socket_nps.dispose = append(socket_nps.dispose, func() {
 				s.Of(namespace).socketLeaveAllRooms(socket_nps)
 				s.Of(namespace).sockets.delete(socket_nps.Id)
 				for _, callback := range socket_nps.listeners.get("disconnect") {
@@ -448,15 +674,18 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 			socket_nps.To = func(room string) *Room {
 				return s.Of(namespace).To(room)
 			}
+			socket_nps.currentNamespace = func() *Namespace {
+				return s.Of(namespace)
+			}
 
-			socket_nps.writer(socket_protocol.CONNECT, engineio.ConnParameters{
+			socket_nps.writer(protocol.CONNECT, engineio.ConnParameters{
 				SID: socket.Id,
 			}.ToJson())
 
 			for _, callback := range s.Of(namespace).onConnection.get("connection") {
 				callback(socket_nps)
 			}
-		case socket_protocol.EVENT.String():
+		case protocol.EVENT.String():
 			socket_nps, err := s.Of(namespace).sockets.get(socket.Id)
 			if err != nil {
 				return err
@@ -468,7 +697,7 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 					ackId:  ackId,
 				}
 			}
-			// case socket_protocol.BINARY_EVENT.String():
+			// case protocol.BINARY_EVENT.String():
 			// 	socket_nps, err := s.Of(namespace).sockets.get(socket.Id)
 			// 	if err != nil {
 			// 		return err
@@ -481,10 +710,22 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 			// 			ackId:  ackId,
 			// 		}
 			// 	}
-			// case socket_protocol.BINARY_ACK.String():
+			// case protocol.BINARY_ACK.String():
 		}
-	case engineio.PONG.String():
-		// println("Client pong")
+	case engineio.PING.String():
+		socket.engineWrite(engineio.PONG, map[string]interface{}{
+			"raw": anyAfterPacketType,
+		})
+
+		if socket.Conn != nil &&
+			socket.Conn.polling != nil {
+			socket.Conn.polling.Close()
+		}
+	case engineio.CLOSE.String():
+		if socket.Conn != nil &&
+			socket.Conn.polling != nil {
+			socket.Conn.polling.Close()
+		}
 	}
 	return nil
 }

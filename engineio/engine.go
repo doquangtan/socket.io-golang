@@ -3,6 +3,7 @@ package engineio
 import (
 	"encoding/json"
 	"io"
+	"reflect"
 	"strconv"
 )
 
@@ -31,13 +32,14 @@ func (id PacketType) String() string {
 }
 
 type writer struct {
-	t PacketType
-	i int64
-	w io.Writer
+	t   PacketType
+	raw string
+	i   int64
+	w   io.Writer
 }
 
 func (w *writer) Write(p []byte) (int, error) {
-	paserData := append([]byte(w.t.String()), p...)
+	paserData := append([]byte(w.t.String()+w.raw), p...)
 	n, err := w.w.Write(paserData)
 	w.i += int64(n)
 	return n, err
@@ -49,6 +51,13 @@ func WriteTo(w io.Writer, t PacketType, arg ...interface{}) (int64, error) {
 		w: w,
 	}
 	if len(arg) > 0 {
+		if reflect.TypeOf(arg[0]).Kind() == reflect.Map &&
+			arg[0].(map[string]interface{})["raw"] != nil &&
+			reflect.TypeOf(arg[0].(map[string]interface{})["raw"]).Kind() == reflect.String {
+			writer.raw = arg[0].(map[string]interface{})["raw"].(string)
+			_, err := writer.Write([]byte{})
+			return writer.i, err
+		}
 		err := json.NewEncoder(&writer).Encode(arg[0])
 		return writer.i, err
 	} else {
