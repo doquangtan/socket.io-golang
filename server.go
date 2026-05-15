@@ -551,12 +551,25 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 		special3 := -1
 		nextMess := message
 
+		if special1 > special2 && special2 != -1 {
+			special1 = -1
+		}
+
+		if special2 > special1 && special1 != -1 {
+			special2 = -1
+		}
+
+		offsetSpecial3 := 0
 		for {
 			nextSpecial3 := strings.Index(string(nextMess), ",")
+			if nextSpecial3 != -1 {
+				nextSpecial3 += offsetSpecial3
+			}
 			if nextSpecial3 == -1 || (special1 != -1 && nextSpecial3 > special1) || (special2 != -1 && nextSpecial3 > special2) {
 				break
 			}
 			nextMess = nextMess[nextSpecial3+1:]
+			offsetSpecial3 += nextSpecial3
 			special3 = nextSpecial3
 		}
 
@@ -651,7 +664,7 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 				}
 			}
 
-			socket_nps.dispose = append(socket_nps.dispose, func() {
+			socket.dispose = append(socket.dispose, func() {
 				s.Of(namespace).socketLeaveAllRooms(socket_nps)
 				s.Of(namespace).sockets.delete(socket_nps.Id)
 				for _, callback := range socket_nps.listeners.get("disconnect") {
@@ -664,6 +677,7 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 					})
 				}
 			})
+
 			s.Of(namespace).sockets.set(socket_nps)
 			socket_nps.Join = func(room string) {
 				s.Of(namespace).socketJoinRoom(room, socket_nps)

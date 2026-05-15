@@ -346,8 +346,8 @@
 	</div>
 
 	<script>
-		const socket = io("/", {
-			// transports: ["websocket"],
+		const socket = io("/admin", {
+			transports: ["websocket"],
 			auth: {
 				token: "123"
 			},
