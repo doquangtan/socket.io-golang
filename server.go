@@ -57,7 +57,7 @@ type Io struct {
 	readChan         chan payload
 	onAuthentication func(params map[string]string) bool
 	onConnection     connectionEvent
-	use              func(socket *Socket, next func() *UseError) *UseError
+	use              func(socket *Socket, next func() error) error
 	close            chan interface{}
 }
 
@@ -240,7 +240,7 @@ func (s *Io) OnAuthentication(fn func(params map[string]string) bool) {
 	s.onAuthentication = fn
 }
 
-func (s *Io) Use(fn func(socket *Socket, next func() *UseError) *UseError) {
+func (s *Io) Use(fn func(socket *Socket, next func() error) error) {
 	s.use = fn
 }
 
@@ -638,16 +638,21 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 			}
 
 			if s.use != nil {
-				err := s.use(socket_nps, func() *UseError {
+				err := s.use(socket_nps, func() error {
 					return nil
 				})
-				var useError *UseError
-				if errors.As(err, &useError) {
-					socket_nps.writer(protocol.CONNECT_ERROR, map[string]interface{}{
-						"message": useError.Message,
-						"data":    useError.Data,
-					})
-					// continue
+				if err != nil {
+					var useError *UseError
+					if errors.As(err, &useError) {
+						socket_nps.writer(protocol.CONNECT_ERROR, map[string]interface{}{
+							"message": useError.Message,
+							"data":    useError.Data,
+						})
+					} else {
+						socket_nps.writer(protocol.CONNECT_ERROR, map[string]interface{}{
+							"message": err.Error(),
+						})
+					}
 					return nil
 				}
 			}
@@ -662,6 +667,7 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 					// continue
 					return nil
 				}
+				socket.Handshake.Auth.Token = dataJson["token"]
 			}
 
 			socket.dispose = append(socket.dispose, func() {
