@@ -8,7 +8,7 @@ IF %func%==public (
 
     git pull
 
-    git tag -a %version% -m "v4.1.8\r\n- Fixed message paser\r\n- Fixed not call dispose namespace when disconnected"
+    git tag -a %version% -m "v4.1.9\r\n- Fixed deadlock at io.Of.To(room)\r\n- Fixed room chaining and deduplication"
 
     git push origin %version%
 
@@ -19,4 +19,4 @@ IF %func%==public (
     echo Done %func%
 )
 
-@REM make public v4.1.8
+@REM make public v4.1.9

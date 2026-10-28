@@ -34,6 +34,9 @@ func (room *Room) Emit(event string, agrs ...interface{}) error {
 }
 
 func (room *Room) Sockets() []*Socket {
+	if len(room.connectSockets) > 0 {
+		return room.connectSockets
+	}
 	return room.sockets.all()
 }
 
@@ -44,8 +47,8 @@ type roomNames struct {
 
 func (l *roomNames) set(name string) {
 	l.Lock()
+	defer l.Unlock()
 	l.list = append(l.list, name)
-	l.Unlock()
 }
 
 func (l *roomNames) delete(name string) int {
@@ -66,17 +69,6 @@ func (l *roomNames) all() []string {
 	return append([]string{}, l.list...)
 }
 
-// func (l *roomNames) get(event string) []eventCallback {
-// 	l.RLock()
-// 	defer l.RUnlock()
-// 	if _, ok := l.list[event]; !ok {
-// 		return make([]eventCallback, 0)
-// 	}
-// 	ret := make([]eventCallback, 0)
-// 	ret = append(ret, l.list[event]...)
-// 	return ret
-// }
-
 type rooms struct {
 	sync.RWMutex
 	list map[string]*Room
@@ -84,41 +76,59 @@ type rooms struct {
 
 func (n *rooms) create(name string) *Room {
 	n.Lock()
+	defer n.Unlock()
 	ret, ok := n.list[name]
 	if !ok {
 		ret = newRoom(name)
+		ret.To = func(room string) *Room {
+			return n.next(room, ret)
+		}
 		n.list[name] = ret
 	}
-	n.Unlock()
 	return ret
 }
 
 func (n *rooms) next(name string, preRoom ...*Room) *Room {
-	n.Lock()
-	ret, ok := n.list[name]
-	if !ok {
-		ret = newRoom(name)
-		n.list[name] = ret
-	}
+	persistRoom := n.create(name)
+	persistSockets := persistRoom.sockets.all()
+
 	if len(preRoom) == 0 {
-		newRoom := newRoom(name)
-		newRoom.connectSockets = append(newRoom.connectSockets, ret.sockets.all()...)
-		ret.To = func(room string) *Room {
-			nextRoom := n.next(room, newRoom)
-			newRoom.Name += "_" + nextRoom.Name
-			newRoom.connectSockets = append(newRoom.connectSockets, nextRoom.sockets.all()...)
-			return newRoom
+		target := newRoom(name)
+		target.connectSockets = persistSockets
+		target.To = func(room string) *Room {
+			return n.next(room, target)
 		}
-	} else {
-		ret.To = func(room string) *Room {
-			nextRoom := n.next(room, preRoom[0])
-			preRoom[0].Name += "_" + nextRoom.Name
-			preRoom[0].connectSockets = append(preRoom[0].connectSockets, nextRoom.sockets.all()...)
-			return preRoom[0]
+		return target
+	}
+
+	prev := preRoom[0]
+	chained := newRoom(prev.Name + "_" + persistRoom.Name)
+
+	seen := make(map[string]bool)
+	var allSockets []*Socket
+
+	prevSockets := prev.connectSockets
+	if len(prevSockets) == 0 {
+		prevSockets = prev.sockets.all()
+	}
+	for _, s := range prevSockets {
+		if s != nil && !seen[s.Id] {
+			seen[s.Id] = true
+			allSockets = append(allSockets, s)
 		}
 	}
-	n.Unlock()
-	return ret
+	for _, s := range persistSockets {
+		if s != nil && !seen[s.Id] {
+			seen[s.Id] = true
+			allSockets = append(allSockets, s)
+		}
+	}
+
+	chained.connectSockets = allSockets
+	chained.To = func(room string) *Room {
+		return n.next(room, chained)
+	}
+	return chained
 }
 
 // func (n *rooms) get(name string) *Room {

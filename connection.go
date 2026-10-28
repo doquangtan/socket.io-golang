@@ -17,11 +17,12 @@ type connections struct {
 
 func (l *connections) set(socket *Socket) error {
 	l.Lock()
+	defer l.Unlock()
 	if l.conn[socket.Id] != nil {
+		l.conn[socket.Id] = socket
 		return ErrorUUIDDuplication
 	}
 	l.conn[socket.Id] = socket
-	l.Unlock()
 	return nil
 }
 
@@ -47,6 +48,6 @@ func (l *connections) all() []*Socket {
 
 func (l *connections) delete(key string) {
 	l.Lock()
+	defer l.Unlock()
 	delete(l.conn, key)
-	l.Unlock()
 }
