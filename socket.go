@@ -3,13 +3,13 @@ package socketio
 import (
 	"errors"
 	"io"
-	"sync"
 	"time"
 
 	"github.com/doquangtan/socketio/v4/engineio"
 	"github.com/doquangtan/socketio/v4/protocol"
 	"github.com/gofiber/websocket/v2"
 	gWebsocket "github.com/gorilla/websocket"
+	"github.com/reugn/async"
 )
 
 type Conn struct {
@@ -64,8 +64,13 @@ func (c *broadcastOperator) Emit(event string, agrs ...interface{}) error {
 	return nil
 }
 
+const (
+	prioHeartbeat = 2 // high priority for ping/pong/noop writes
+	prioData      = 1 // low priority for application data writes
+)
+
 type Socket struct {
-	sync.RWMutex
+	mu               *async.PriorityLock
 	Id               string
 	Nps              string
 	Conn             *Conn
@@ -157,8 +162,8 @@ func (s *Socket) disconnect() {
 }
 
 func (s *Socket) engineWrite(t engineio.PacketType, arg ...interface{}) error {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.LockP(prioHeartbeat)
+	defer s.mu.Unlock()
 	w, err := s.Conn.nextWriter(websocket.TextMessage)
 	if err != nil {
 		return err
@@ -168,8 +173,8 @@ func (s *Socket) engineWrite(t engineio.PacketType, arg ...interface{}) error {
 }
 
 func (s *Socket) writer(t protocol.PacketType, arg ...interface{}) error {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.LockP(prioData)
+	defer s.mu.Unlock()
 	w, err := s.Conn.nextWriter(websocket.TextMessage)
 	if err != nil {
 		return err

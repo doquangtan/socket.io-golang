@@ -16,6 +16,7 @@ import (
 	"github.com/doquangtan/socketio/v4/client"
 	"github.com/doquangtan/socketio/v4/engineio"
 	"github.com/doquangtan/socketio/v4/protocol"
+	"github.com/reugn/async"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
@@ -121,6 +122,7 @@ func (s *Io) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			defer socket.disconnect()
 		} else {
 			socket = &Socket{
+				mu:  async.NewPriorityLock(2),
 				Id:  s.randomUUID(),
 				Nps: "/",
 				Conn: &Conn{
@@ -359,6 +361,7 @@ func (s *Io) handleWebsocket(ctx *fiber.Ctx) error {
 			defer socket.disconnect()
 		} else {
 			socket = &Socket{
+				mu:  async.NewPriorityLock(2),
 				Id:  s.randomUUID(),
 				Nps: "/",
 				Conn: &Conn{
@@ -404,6 +407,7 @@ func (s *Io) handleWebsocket(ctx *fiber.Ctx) error {
 
 func (s *Io) handleHandshake(w http.ResponseWriter, r *http.Request) {
 	socket := &Socket{
+		mu:  async.NewPriorityLock(2),
 		Id:  s.randomUUID(),
 		Nps: "/",
 		Conn: &Conn{
@@ -618,6 +622,7 @@ func (s *Io) handlerMessage(socket *Socket, message string) error {
 			socket_nps := socket
 			if namespace != "/" {
 				socketWithNamespace := Socket{
+					mu:   async.NewPriorityLock(2),
 					Id:   socket.Id,
 					Nps:  namespace,
 					Conn: socket.Conn,
